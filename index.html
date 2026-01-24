@@ -6,7 +6,11 @@
   <title>棚卸スキャナ</title>
 
   <link rel="stylesheet" href="./style.css" />
-  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <!-- ZXing（バーコード） -->
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js"></script>
+  <!-- Tesseract（OCR：番号読み） -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
 </head>
 
 <body>
@@ -36,8 +40,8 @@
 
       <div class="card">
         <p class="muted">
-          ※ バーコードスキャナ運用推奨（Enterで確定）<br />
-          カメラは全画面で連続スキャンします（読み取り後も閉じません）
+          ※ バーコード or シール番号（OCR）で反応します<br />
+          カメラは全画面で連続スキャン（閉じません）
         </p>
 
         <button id="btnCamera">📷 カメラでスキャン（全画面・連続）</button>
@@ -63,9 +67,7 @@
 
       <div class="card" id="remainCard" style="display:none">
         <strong>未スキャン一覧（この店舗）</strong>
-        <div class="muted small" style="margin-top:6px">
-          グリッド表示：管理No／マシン名
-        </div>
+        <div class="muted small" style="margin-top:6px">グリッド表示：管理No／マシン名</div>
         <div id="remainList" class="remainGrid"></div>
       </div>
     </div>
@@ -79,39 +81,56 @@
     </div>
   </div>
 
-  <!-- カメラ全画面モーダル -->
+  <!-- カメラ全画面モーダル（video + overlay を分離して崩れにくく） -->
   <div id="camModal" aria-hidden="true">
     <div id="camTop">
-      <div id="camStatus" style="font-size:12px;opacity:.85"></div>
       <div class="camTopLeft">
-        <div id="camHint">シール（5×3.5cm）を枠に入れるだけでOK</div>
-        <div class="camSubHint">※ 15〜25cm目安／タップ不要でAFを維持</div>
+        <div id="camStatus" class="camStatus">camera: -</div>
+        <div id="camHint" class="camHint">バーコードはなるべく正対／番号でもOK</div>
+        <div class="camSubHint">※ 15〜25cm目安／ズームで反応が上がります</div>
       </div>
 
       <div class="camTopRight">
-        <div class="zoomBox">
-          <span class="zoomLabel">ZOOM</span>
-          <input id="zoomRange" type="range" min="1" max="3" step="0.1" value="1" />
-          <span id="zoomVal" class="zoomVal">1.0x</span>
+        <div class="toolPill">
+          <span class="pillLabel">ZOOM</span>
+          <input id="zoomRange" type="range" min="1" max="3" step="0.1" value="1.6" />
+          <span id="zoomVal" class="pillVal">1.6x</span>
         </div>
+
+        <button id="btnTorch" class="secondary">🔦</button>
         <button id="camClose" class="secondary">⏹ 閉じる</button>
       </div>
     </div>
 
-    <div id="qrReader"></div>
+    <div id="videoWrap">
+      <video id="camVideo" playsinline muted></video>
 
-    <div id="camFrame" aria-hidden="true">
-      <div class="corner tl"></div>
-      <div class="corner tr"></div>
-      <div class="corner br"></div>
-      <div class="corner bl"></div>
+      <!-- overlay（videoと別レイヤー） -->
+      <div id="overlay" aria-hidden="true">
+        <div class="guideText">バーコード帯をここに（読めない時は番号でもOK）</div>
+
+        <!-- バーコード帯ガイド：水平2本（斜め弱さ対策） -->
+        <div class="band top"></div>
+        <div class="band bottom"></div>
+
+        <!-- コーナー（薄め） -->
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner br"></div>
+        <div class="corner bl"></div>
+
+        <!-- flash（成功時） -->
+        <div id="flash" class="flash"></div>
+      </div>
     </div>
 
     <!-- 成功トースト -->
     <div id="toast" class="toast" aria-hidden="true"></div>
+
+    <!-- OCRワーカー初期化中など -->
+    <div id="ocrBadge" class="ocrBadge" aria-hidden="true">OCR準備中…</div>
   </div>
 
   <script src="./app.js"></script>
 </body>
 </html>
-
