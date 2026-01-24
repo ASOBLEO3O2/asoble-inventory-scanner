@@ -2,9 +2,13 @@
 const DATA_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
-// 連続スキャン時の誤連打抑制
+// 連続検出の誤連打抑制
 const SAME_CODE_COOLDOWN_MS = 900;   // 同一コードは0.9秒は無視
-const ANY_CODE_COOLDOWN_MS  = 180;   // 連打全体も少し抑制
+const ANY_CODE_COOLDOWN_MS  = 180;   // 全体も少し抑制
+
+// OCRの頻度（バーコードが来ない時だけ動かす）
+const OCR_INTERVAL_MS = 700;         // 0.7秒毎
+const OCR_MIN_GAP_AFTER_HIT_MS = 1200; // 直近でHITしたらOCRしない
 
 /* ========= 状態 ========= */
 const el = (id) => document.getElementById(id);
@@ -34,6 +38,7 @@ function codeVariants(raw){
   const out = new Set();
   out.add(c);
   out.add(c.replace(/^0+/, ""));
+
   const digits = c.replace(/\D/g, "");
   if(digits){
     out.add(digits);
@@ -44,7 +49,6 @@ function codeVariants(raw){
 
 /* ========= CSV ========= */
 function parseCSV(t){
-  // ※CSV内にカンマが含まれる可能性があるなら、ここは後で強化が必要
   const lines = t.replace(/\r/g,"").split("\n").filter(Boolean);
   if(!lines.length) return [];
   const header = lines.shift().split(",").map(x=>x.trim());
@@ -81,8 +85,31 @@ function escapeHtml(s){
     .replaceAll('"',"&quot;")
     .replaceAll("'","&#39;");
 }
-function vibrateOk(){ try{ if(navigator.vibrate) navigator.vibrate([60,30,60]); }catch(_e){} }
-function vibrateDone(){ try{ if(navigator.vibrate) navigator.vibrate([120,60,120,60,220]); }catch(_e){} }
+
+// iOSは振動がほぼ無理（Chromeでも中身WebKit）→ 代替の音/フラッシュを強める
+function vibrateOk(){
+  try{ if(navigator.vibrate) navigator.vibrate([60,30,60]); }catch(_e){}
+}
+function vibrateDone(){
+  try{ if(navigator.vibrate) navigator.vibrate([120,60,120,60,220]); }catch(_e){}
+}
+
+// 成功時：音（iOSでも鳴りやすいよう、最初のユーザー操作後に使う）
+let audioCtx = null;
+function beep(){
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtx;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "square";
+    o.frequency.value = 880;
+    g.gain.value = 0.04;
+    o.connect(g); g.connect(ctx.destination);
+    o.start();
+    setTimeout(()=>{ o.stop(); }, 90);
+  }catch(_e){}
+}
 
 let toastTimer = null;
 function showToast(text){
@@ -98,6 +125,13 @@ function showToast(text){
   }, 900);
 }
 
+function flash(){
+  const f = el("flash");
+  if(!f) return;
+  f.classList.add("on");
+  setTimeout(()=>f.classList.remove("on"), 70);
+}
+
 /* ========= バッジ/進捗 ========= */
 function showDoneIfComplete(){
   if(!STORE) return;
@@ -106,6 +140,7 @@ function showDoneIfComplete(){
   if(total > 0 && done >= total){
     el("doneOverlay").style.display = "flex";
     vibrateDone();
+    beep();
   }
 }
 function hideDone(){ el("doneOverlay").style.display = "none"; }
@@ -214,7 +249,6 @@ function renderPanels(){
   }).join("");
 }
 
-/* 未スキャン一覧：グリッド描画 */
 function renderRemainGrid(){
   if(!STORE) return;
   const remainRows = st.rows.filter(r => !st.okSet.has(normalize(r.code)));
@@ -233,7 +267,7 @@ function renderRemainGrid(){
   el("remainCard").scrollIntoView({ behavior:"smooth", block:"start" });
 }
 
-/* ========= スキャン ========= */
+/* ========= スキャン確定 ========= */
 function addScan(v){
   const variants = codeVariants(v);
   if(!variants.length) return;
@@ -257,31 +291,49 @@ function addScan(v){
     st.okSet.add(hitKey);
     if(st.okSet.size > before){
       vibrateOk();
+      beep();
+      flash();
       showToast(`✅ ${hitRow.code} ／ ${hitRow.machine_name || "-"}`);
+      lastHitTs = Date.now();
     }else{
+      // 再スキャン（弱め）
       try{ if(navigator.vibrate) navigator.vibrate(30); }catch(_e){}
       showToast(`✅（再）${hitRow.code}`);
+      lastHitTs = Date.now();
     }
   }else{
     st.ngCount++;
     showToast(`❌ 一致なし`);
   }
 
-  st.scanned.unshift({ code: variants[0], row: hitRow, ok, ts: Date.now(), hitKey });
-
+  st.scanned.unshift({ code: variants[0], row: hitRow, ok, ts: Date.now() });
   el("msg").textContent = ok ? "一致しました（連続スキャン中）" : "一致なし（リストにありません）";
+
   renderPanels();
   showDoneIfComplete();
 }
 
-/* ========= カメラ（全画面・連続） ========= */
-let qr = null;
+/* ========= カメラ（ZXing + OCR） ========= */
 let camRunning = false;
+let stream = null;
 
-// 連続検出のデバウンス用
+// debounce
 let lastAnyTs = 0;
 let lastText = "";
 let lastTextTs = 0;
+let lastHitTs = 0;
+
+// video
+const videoEl = () => el("camVideo");
+
+// ZXing
+let zxingReader = null;
+let zxingStopFn = null;
+
+// OCR
+let ocrWorker = null;
+let ocrTimer = null;
+let ocrBusy = false;
 
 function openCamModal(){
   el("camModal").style.display = "block";
@@ -292,143 +344,336 @@ function closeCamModal(){
   el("camModal").setAttribute("aria-hidden","true");
 }
 
-function makeQrbox(){
-  // シール比率 1.43 に近い 1.5 / 背景ノイズを減らすため少し小さめ
-  const vw = Math.min(window.innerWidth, 700);
-  const w = Math.round(vw * 0.74);
-  const h = Math.round(w / 1.5);
-  const ww = Math.max(240, Math.min(w, 460));
-  const hh = Math.max(160, Math.min(h, 300));
-  return { width: ww, height: hh };
+function setCamStatus(text){
+  const s = el("camStatus");
+  if(s) s.textContent = text;
 }
 
-/* 可能な範囲でカメラ制約を当てる（端末依存） */
-async function applyCameraTuning(){
-  if(!qr) return;
-
-  // 連続AF（効けば「タップで合う」が減る）
-  try{
-    await qr.applyVideoConstraints({
-      advanced: [
-        { focusMode: "continuous" },
-        { exposureMode: "continuous" }
-      ]
-    });
-  }catch(_e){}
-
-  // ズーム（スライダー値を適用）
-  await applyZoomFromUI();
-}
-
-async function applyZoomFromUI(){
-  if(!qr) return;
-  const zr = el("zoomRange");
-  const zv = el("zoomVal");
-  if(!zr || !zv) return;
-
-  const z = Number(zr.value || 1);
-  zv.textContent = `${z.toFixed(1)}x`;
-
-  try{
-    await qr.applyVideoConstraints({ advanced: [{ zoom: z }] });
-  }catch(_e){
-    // iOS等、zoom制約が効かない端末では無視
+function setOcrBadge(on, text){
+  const b = el("ocrBadge");
+  if(!b) return;
+  if(on){
+    b.classList.add("on");
+    b.setAttribute("aria-hidden","false");
+    b.textContent = text || "OCR準備中…";
+  }else{
+    b.classList.remove("on");
+    b.setAttribute("aria-hidden","true");
   }
 }
 
-/* iPhoneで「無反応」対策：Status表示＋推奨フラグON */
-function setCamStatus(){
-  const s = el("camStatus");
-  if(!s) return;
-
-  const bd = ("BarcodeDetector" in window);
-  // 補足：SafariはOKでも読めない場合があるので強い言い切りは避ける
-  s.textContent = bd
-    ? "BarcodeDetector: OK（対応の可能性あり）"
-    : "BarcodeDetector: NG（この環境は1Dバーコードが読めない可能性）";
+/* 端末が対応してればズーム/トーチを当てる */
+async function applyTrackConstraints(advanced){
+  try{
+    const tr = stream?.getVideoTracks?.()[0];
+    if(!tr) return false;
+    await tr.applyConstraints({ advanced: [advanced] });
+    return true;
+  }catch(_e){
+    return false;
+  }
 }
 
+async function applyZoomFromUI(){
+  const zr = el("zoomRange");
+  const zv = el("zoomVal");
+  if(!zr || !zv) return;
+  const z = Number(zr.value || 1);
+  zv.textContent = `${z.toFixed(1)}x`;
+
+  // zoomは対応端末のみ
+  await applyTrackConstraints({ zoom: z });
+}
+
+let torchOn = false;
+async function toggleTorch(){
+  torchOn = !torchOn;
+  const ok = await applyTrackConstraints({ torch: torchOn });
+  if(!ok){
+    torchOn = false;
+    showToast("🔦 この端末はトーチ非対応");
+  }else{
+    showToast(torchOn ? "🔦 ON" : "🔦 OFF");
+  }
+}
+
+/* OCR: 画面中央の“帯”だけ切り出して、番号候補を拾う */
+function createOcrCanvasFromVideo(){
+  const v = videoEl();
+  const vw = v.videoWidth || 0;
+  const vh = v.videoHeight || 0;
+  if(!vw || !vh) return null;
+
+  // 中央帯（バーコード帯＋番号が入りやすい範囲）
+  const bandH = Math.floor(vh * 0.28);
+  const sy = Math.floor((vh - bandH) / 2);
+  const sx = Math.floor(vw * 0.10);
+  const sw = Math.floor(vw * 0.80);
+  const sh = bandH;
+
+  const canvas = document.createElement("canvas");
+  // OCR用に少し拡大して精度UP（重すぎない範囲）
+  canvas.width = 900;
+  canvas.height = Math.floor(900 * (sh / sw));
+
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(v, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+  // ちょいコントラスト（簡易）
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  for(let i=0;i<d.length;i+=4){
+    const r=d[i], g=d[i+1], b=d[i+2];
+    // グレースケール
+    let y = (0.2126*r + 0.7152*g + 0.0722*b);
+    // コントラスト
+    y = (y - 128) * 1.25 + 128;
+    y = Math.max(0, Math.min(255, y));
+    d[i]=d[i+1]=d[i+2]=y;
+  }
+  ctx.putImageData(img,0,0);
+
+  return canvas;
+}
+
+function extractCandidatesFromText(text){
+  const raw = String(text || "").toUpperCase();
+
+  // よくある誤読補正（最低限）
+  const fixed = raw
+    .replaceAll("O","0")
+    .replaceAll("I","1")
+    .replaceAll("L","1")
+    .replaceAll("S","5");
+
+  // 英数の塊を抽出（長さ4以上）
+  const parts = fixed.split(/[^A-Z0-9]+/g).filter(Boolean);
+  const cand = [];
+
+  for(const p of parts){
+    if(p.length < 4) continue;
+    cand.push(p);
+
+    // 数字だけも候補に
+    const digits = p.replace(/\D/g,"");
+    if(digits.length >= 4) cand.push(digits);
+  }
+
+  // 重複除去
+  return [...new Set(cand)];
+}
+
+function tryHitByCandidates(cands){
+  for(const c of cands){
+    // codeVariantsで照合を強化
+    const vars = codeVariants(c);
+    for(const v of vars){
+      const row = st.byCode.get(v);
+      if(row){
+        addScan(row.code); // “正規のcode”を確定として入れる
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/* OCRワーカーを起動（初回は重いのでバッジ表示） */
+async function ensureOcrWorker(){
+  if(ocrWorker) return;
+
+  setOcrBadge(true, "OCR準備中…（初回だけ数秒）");
+
+  // @ts-ignore
+  ocrWorker = await Tesseract.createWorker("eng", 1, {
+    logger: (m) => {
+      // 必要ならログ表示も可能（普段は黙らせる）
+      // console.log(m);
+    }
+  });
+
+  // 文字セットを絞って高速化＆精度UP
+  await ocrWorker.setParameters({
+    tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    preserve_interword_spaces: "1",
+  });
+
+  setOcrBadge(false);
+}
+
+/* OCRループ：バーコードが来ない時だけ動かす */
+function startOcrLoop(){
+  stopOcrLoop();
+  ocrTimer = setInterval(async ()=>{
+    if(!camRunning) return;
+    if(ocrBusy) return;
+
+    const now = Date.now();
+    if(now - lastHitTs < OCR_MIN_GAP_AFTER_HIT_MS) return; // 直近HITなら走らせない
+
+    // なるべく軽く：videoが生きているか
+    const v = videoEl();
+    if(!v || !v.videoWidth) return;
+
+    ocrBusy = true;
+    try{
+      await ensureOcrWorker();
+
+      const canvas = createOcrCanvasFromVideo();
+      if(!canvas){ ocrBusy=false; return; }
+
+      setOcrBadge(true, "OCR中…（番号でもOK）");
+
+      const res = await ocrWorker.recognize(canvas);
+      const text = res?.data?.text || "";
+
+      const cands = extractCandidatesFromText(text);
+      // console.log("[OCR]", text, cands);
+
+      if(cands.length){
+        const hit = tryHitByCandidates(cands);
+        if(hit){
+          lastHitTs = Date.now();
+        }
+      }
+    }catch(_e){
+      // OCRは落ちても運用は継続
+    }finally{
+      setOcrBadge(false);
+      ocrBusy = false;
+    }
+  }, OCR_INTERVAL_MS);
+}
+
+function stopOcrLoop(){
+  if(ocrTimer){
+    clearInterval(ocrTimer);
+    ocrTimer = null;
+  }
+  setOcrBadge(false);
+}
+
+/* ZXing：連続読取 */
+function startZxingLoop(){
+  if(!window.ZXingBrowser){
+    setCamStatus("ZXing: NG（ライブラリ読込失敗）");
+    return;
+  }
+
+  // @ts-ignore
+  zxingReader = new window.ZXingBrowser.BrowserMultiFormatReader();
+
+  // decodeFromVideoElementContinuously がUMDにあるが、環境差を避けて safe に実装
+  // @ts-ignore
+  const controls = zxingReader.decodeFromVideoElement(videoEl(), (result, err) => {
+    const now = Date.now();
+
+    // 連打抑制
+    if(now - lastAnyTs < ANY_CODE_COOLDOWN_MS) return;
+
+    if(result && result.getText){
+      const text = result.getText();
+      const n = normalize(text);
+      if(!n) return;
+
+      // 同一コード連続抑制
+      if(n === lastText && (now - lastTextTs) < SAME_CODE_COOLDOWN_MS) return;
+
+      lastAnyTs = now;
+      lastText = n;
+      lastTextTs = now;
+
+      addScan(text);
+      lastHitTs = Date.now();
+    }
+    // err は無視（NotFoundなど常時出る）
+  });
+
+  zxingStopFn = () => {
+    try{ controls?.stop?.(); }catch(_e){}
+  };
+
+  setCamStatus("camera: ON / ZXing: ON / OCR: ON（フォールバック）");
+}
+
+/* start camera */
 async function startCamera(){
   if(!STORE){ alert("先に店舗を選択してください"); return; }
   if(camRunning) return;
 
-  setCamStatus();
   openCamModal();
 
-  if(!qr) qr = new Html5Qrcode("qrReader");
+  // ユーザー操作後なので音声コンテキストを起こしておく
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if(audioCtx.state === "suspended") await audioCtx.resume();
+  }catch(_e){}
 
-  const config = {
-    fps: 10,
-    qrbox: makeQrbox(),
-    disableFlip: true,
+  // getUserMedia
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: "environment",
+        width: { ideal: 1280 },
+        height:{ ideal: 720 }
+      },
+      audio: false
+    });
+  }catch(e){
+    closeCamModal();
+    alert("カメラ起動に失敗しました（権限/HTTPS/端末）");
+    return;
+  }
 
-    // ✅ ここが重要（対応環境では1Dが上がる）
-    experimentalFeatures: {
-      useBarCodeDetectorIfSupported: true
-    },
-
-    formatsToSupport: [
-      Html5QrcodeSupportedFormats.EAN_13,
-      Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.UPC_A,
-      Html5QrcodeSupportedFormats.UPC_E,
-      Html5QrcodeSupportedFormats.CODE_128,
-      Html5QrcodeSupportedFormats.CODE_39,
-    ],
-  };
-
-  const onOk = (text) => {
-    const now = Date.now();
-
-    // 全体クールダウン（連打抑制）
-    if(now - lastAnyTs < ANY_CODE_COOLDOWN_MS) return;
-
-    const n = normalize(text);
-    if(!n) return;
-
-    // 同一コードの連続発火抑制（連続フレームで同じ値が来るのを抑える）
-    if(n === lastText && (now - lastTextTs) < SAME_CODE_COOLDOWN_MS) return;
-
-    lastAnyTs = now;
-    lastText = n;
-    lastTextTs = now;
-
-    addScan(text);
-
-    // ✅ 連続スキャン：止めない／閉じない
-  };
-
-  const onErr = (_)=>{};
+  // video attach
+  const v = videoEl();
+  v.srcObject = stream;
+  try{ await v.play(); }catch(_e){}
 
   camRunning = true;
 
-  try{
-    await qr.start({facingMode:"environment"}, config, onOk, onErr);
-    await applyCameraTuning();
-  }catch(e1){
-    try{
-      const cams = await Html5Qrcode.getCameras();
-      const camId = cams[cams.length-1]?.id;
-      await qr.start({deviceId:{exact:camId}}, config, onOk, onErr);
-      await applyCameraTuning();
-    }catch(e2){
-      camRunning = false;
-      closeCamModal();
-      alert("カメラ起動に失敗しました（権限/HTTPS/再読み込みを確認）");
-    }
-  }
+  // 初期ズーム適用（対応端末のみ）
+  await applyZoomFromUI();
+
+  // ZXing開始
+  startZxingLoop();
+
+  // OCR開始
+  startOcrLoop();
 }
 
+/* stop camera */
 async function stopCamera(){
-  if(!qr || !camRunning){
+  if(!camRunning){
     closeCamModal();
     return;
   }
-  try{ await qr.stop(); }catch(_){}
-  camRunning = false;
-  closeCamModal();
 
-  // 閉じたら入力に戻す
+  camRunning = false;
+
+  // stop loops
+  stopOcrLoop();
+  if(zxingStopFn){
+    try{ zxingStopFn(); }catch(_e){}
+    zxingStopFn = null;
+  }
+  try{
+    zxingReader?.reset?.();
+  }catch(_e){}
+  zxingReader = null;
+
+  // stop stream
+  try{
+    stream?.getTracks?.().forEach(t => t.stop());
+  }catch(_e){}
+  stream = null;
+
+  // OCR workerは保持（次回起動を高速化）
+  // ※メモリ厳しい端末なら stop 時に terminate してもOK
+  // if(ocrWorker){ await ocrWorker.terminate(); ocrWorker=null; }
+
+  closeCamModal();
   el("scanInput").focus();
 }
 
@@ -443,6 +688,7 @@ async function stopCamera(){
   // カメラ操作
   el("btnCamera").onclick = () => startCamera();
   el("camClose").onclick = () => stopCamera();
+  el("btnTorch").onclick = () => toggleTorch();
   el("camModal").addEventListener("click", (e) => {
     if(e.target === el("camModal")) stopCamera();
   });
@@ -508,4 +754,3 @@ async function stopCamera(){
   renderScan();
   renderPanels();
 })();
-
