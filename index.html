@@ -76,6 +76,16 @@
       <div id="msg" class="muted"></div>
     </div>
 
+<button class="btn" id="btnCamera">📷 カメラでスキャン</button>
+
+<div id="qrReader" style="
+  width:100%;
+  max-width:420px;
+  margin:12px auto;
+  display:none;
+"></div>
+
+    
     <div class="grid">
       <div class="card">
         <div class="row" style="justify-content:space-between">
@@ -214,6 +224,55 @@ async function boot(){
   st.rows.forEach(r=>st.byCode.set(normalizeCode(r.code),r));
   renderScanner();
 }
+
+  <script>
+let qr = null;
+
+function startCameraScan() {
+  const box = document.getElementById("qrReader");
+  box.style.display = "";
+
+  if (!qr) {
+    qr = new Html5Qrcode("qrReader");
+  }
+
+  Html5Qrcode.getCameras().then(devices => {
+    if (!devices.length) {
+      alert("カメラが見つかりません");
+      return;
+    }
+
+    const cameraId = devices[0].id; // 背面カメラが最初に来ることが多い
+
+    qr.start(
+      cameraId,
+      {
+        fps: 10,
+        qrbox: { width: 280, height: 140 }, // バーコード向け横長
+        aspectRatio: 1.777,
+      },
+      (decodedText) => {
+        // 読み取ったら停止
+        qr.stop();
+        box.style.display = "none";
+
+        // 既存の棚卸ロジックへ流す
+        addScan(decodedText);
+      },
+      (err) => {
+        // 読み取り中エラーは無視
+      }
+    );
+  }).catch(err => {
+    alert("カメラ起動エラー: " + err);
+  });
+}
+
+document.getElementById("btnCamera").addEventListener("click", () => {
+  startCameraScan();
+});
+</script>
+
 
 boot();
 </script>
