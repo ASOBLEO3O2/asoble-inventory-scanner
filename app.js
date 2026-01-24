@@ -341,21 +341,26 @@ async function startCamera(){
 
   if(!qr) qr = new Html5Qrcode("qrReader");
 
-  const config = {
-    fps: 12,
-    qrbox: makeQrbox(),
-    disableFlip: true,
-    // ✅ 端末が対応していれば BarCodeDetector を使って高速・高精度に
-    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-    formatsToSupport: [
-      Html5QrcodeSupportedFormats.EAN_13,
-      Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.UPC_A,
-      Html5QrcodeSupportedFormats.UPC_E,
-      Html5QrcodeSupportedFormats.CODE_128,
-      Html5QrcodeSupportedFormats.CODE_39,
-    ],
-  };
+const config = {
+  fps: 10,
+  qrbox: makeQrbox(),
+  disableFlip: true,
+
+  // ✅ 追加（重要）
+  experimentalFeatures: {
+    useBarCodeDetectorIfSupported: true
+  },
+
+  formatsToSupport: [
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.UPC_A,
+    Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.CODE_128,
+    Html5QrcodeSupportedFormats.CODE_39,
+  ],
+};
+
 
   const onOk = (text) => {
     const now = Date.now();
