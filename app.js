@@ -1,5 +1,7 @@
 // ★ここだけあなたの公開CSVに差し替え
-const DATA_CSV_URL = "PASTE_YOUR_DATA_CSV_URL_HERE";
+const DATA_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
+
 
 const qs = new URLSearchParams(location.search);
 const STORE = (qs.get("store") || "").trim(); // 空なら全店舗
