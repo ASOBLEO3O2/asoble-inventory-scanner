@@ -233,14 +233,22 @@ async function startCamera(){
 
   if(!qr) qr = new Html5Qrcode("qrReader");
 
-  const cams = await Html5Qrcode.getCameras();
-  if(!cams || cams.length === 0){
-    alert("カメラが見つかりません");
+  let cams = [];
+  try {
+    cams = await Html5Qrcode.getCameras();
+  } catch (e) {
     el("cameraWrap").style.display = "none";
+    alert("カメラ取得に失敗しました（権限/HTTPSを確認）");
     return;
   }
 
-  // ✅ 背面カメラ優先（labelが空の時は「最後のカメラ」を採用）
+  if(!cams || cams.length === 0){
+    el("cameraWrap").style.display = "none";
+    alert("カメラが見つかりません");
+    return;
+  }
+
+  // ✅ 背面カメラ優先（labelが空の時は末尾を使う）
   let cameraId = null;
   for(const cam of cams){
     if(/back|rear|environment/i.test(cam.label || "")){
@@ -250,7 +258,44 @@ async function startCamera(){
   }
   if(!cameraId) cameraId = cams[cams.length - 1].id;
 
+  // ✅ 1Dバーコード向け設定
+  const config = {
+    fps: 12,
+    qrbox: { width: 360, height: 120 },
+    disableFlip: true,
+    formatsToSupport: [
+      Html5QrcodeSupportedFormats.EAN_13,
+      Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A,
+      Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.CODE_39,
+    ],
+  };
+
+  const onOk = (text) => {
+    stopCamera();
+    addScan(text);
+  };
+  const onErr = (_err) => {};
+
   camRunning = true;
+
+  try {
+    // ✅ まずは背面指定（iPhoneで安定しやすい）
+    await qr.start({ facingMode: "environment" }, config, onOk, onErr);
+  } catch (e1) {
+    try {
+      // ✅ だめなら deviceId で確実に背面っぽいカメラへ
+      await qr.start({ deviceId: { exact: cameraId } }, config, onOk, onErr);
+    } catch (e2) {
+      // ✅ どっちも失敗：後始末
+      camRunning = false;
+      el("cameraWrap").style.display = "none";
+      alert("カメラ起動に失敗しました（Safariの権限/別タブ起動/再読み込みを試してください）");
+    }
+  }
+}
 
 await qr.start(
   { facingMode: "environment" }, // ✅ 背面カメラ優先（iPhoneで安定しやすい）
