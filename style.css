@@ -25,8 +25,6 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
 
 .stack{margin-top:10px;display:flex;flex-direction:column;gap:10px}
 
-.remainList{margin-top:10px;white-space:pre-wrap}
-
 /* 進捗バー */
 .progressWrap{margin-top:10px}
 .progressBar{width:100%;height:12px;background:#0b1020;border:1px solid #334155;border-radius:999px;overflow:hidden}
@@ -47,6 +45,22 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
 .hitRow .machine{color:#cbd5e1}
 .hitRow .tag{font-size:12px;padding:2px 8px;border-radius:999px;background:#0f172a;border:1px solid #334155;color:#cbd5e1}
 
+/* ✅ 未取得リスト：グリッド */
+.remainGrid{
+  margin-top:10px;
+  display:grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap:10px;
+}
+.remainItem{
+  background:#0b1220;
+  border:1px solid #334155;
+  border-radius:12px;
+  padding:10px;
+}
+.remainItem .c{font-weight:900}
+.remainItem .m{color:#cbd5e1;font-size:13px;margin-top:4px}
+
 /* ===== カメラ全画面モーダル ===== */
 #camModal{
   position:fixed; inset:0;
@@ -56,29 +70,43 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
 }
 #camTop{
   position:absolute; top:0; left:0; right:0;
-  display:flex; gap:10px; align-items:center; justify-content:space-between;
-  padding:10px;
-  background:linear-gradient(to bottom, rgba(0,0,0,.7), rgba(0,0,0,0));
+  display:flex; gap:10px; align-items:flex-start; justify-content:space-between;
+  padding:10px 10px 14px;
+  background:linear-gradient(to bottom, rgba(0,0,0,.78), rgba(0,0,0,0));
   z-index:2;
 }
-#camHint{font-size:13px;color:#e5e7eb;opacity:.9}
+.camTopLeft{display:flex;flex-direction:column;gap:4px}
+#camHint{font-size:13px;color:#e5e7eb;opacity:.95}
+.camSubHint{font-size:12px;color:#cbd5e1;opacity:.85}
+.camTopRight{display:flex;gap:10px;align-items:center}
+
+.zoomBox{
+  display:flex;gap:8px;align-items:center;
+  background:rgba(15,23,42,.65);
+  border:1px solid rgba(148,163,184,.35);
+  padding:8px 10px;border-radius:12px;
+}
+.zoomLabel{font-size:12px;color:#cbd5e1}
+#zoomRange{width:120px}
+.zoomVal{font-size:12px;color:#e5e7eb;min-width:42px;text-align:right}
+
 #qrReader{position:absolute; inset:0}
 
-/* html5-qrcodeが描く緑枠（scan region）を消す */
+/* ✅ 緑枠（html5-qrcodeが描くscan region）を消す：ガイドは白枠だけ */
 #qrReader__scan_region{border:none !important;}
 #qrReader__scan_region video{outline:none !important;}
 
 /* ガイド文（赤線は目安） */
 #qrReader::before{
   content:"シール全体を枠の中へ（赤線は目安）";
-  position:absolute; top:56px; left:0; right:0;
+  position:absolute; top:74px; left:0; right:0;
   text-align:center; font-size:13px; color:#ff9aa2;
   z-index:3; pointer-events:none;
 }
 /* 赤線（薄く） */
 #qrReader::after{
   content:""; position:absolute; top:50%; left:10%;
-  width:80%; height:2px; background:#ff3b30; opacity:.25;
+  width:80%; height:2px; background:#ff3b30; opacity:.18;
   z-index:3; pointer-events:none;
 }
 
@@ -98,3 +126,23 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
 .corner.tr{right:0;top:0;transform:rotate(90deg)}
 .corner.br{right:0;bottom:0;transform:rotate(180deg)}
 .corner.bl{left:0;bottom:0;transform:rotate(270deg)}
+
+/* ✅ 成功トースト */
+.toast{
+  position:absolute;
+  left:50%; bottom:26px;
+  transform:translateX(-50%);
+  background:rgba(17,24,39,.85);
+  border:1px solid rgba(148,163,184,.35);
+  color:#e5e7eb;
+  padding:10px 12px;
+  border-radius:12px;
+  font-size:14px;
+  z-index:4;
+  display:none;
+  max-width:min(92vw, 680px);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.toast.show{display:block}
