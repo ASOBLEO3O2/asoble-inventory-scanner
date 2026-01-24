@@ -2,6 +2,10 @@
 const DATA_CSV_URL =
  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
+// 連続スキャン時の誤連打抑制（同じコードが連続で来るのを防ぐ）
+const SAME_CODE_COOLDOWN_MS = 900;   // 同一コードは0.9秒は無視
+const ANY_CODE_COOLDOWN_MS  = 180;   // 連打全体も少し抑制
+
 /* ========= 状態 ========= */
 const el = (id) => document.getElementById(id);
 const qs = new URLSearchParams(location.search);
@@ -78,6 +82,19 @@ function escapeHtml(s){
 }
 function vibrateOk(){ try{ if(navigator.vibrate) navigator.vibrate([60,30,60]); }catch(_e){} }
 function vibrateDone(){ try{ if(navigator.vibrate) navigator.vibrate([120,60,120,60,220]); }catch(_e){} }
+
+let toastTimer = null;
+function showToast(text){
+  const t = el("toast");
+  t.textContent = text;
+  t.classList.add("show");
+  t.setAttribute("aria-hidden","false");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{
+    t.classList.remove("show");
+    t.setAttribute("aria-hidden","true");
+  }, 900);
+}
 
 /* ========= バッジ/進捗 ========= */
 function showDoneIfComplete(){
@@ -176,7 +193,7 @@ function renderPanels(){
     el("current").innerHTML = `<div class="ng">❌ ${escapeHtml(last.code)}</div>`;
   }
 
-  el("history").innerHTML = st.scanned.slice(0, 80).map(x=>{
+  el("history").innerHTML = st.scanned.slice(0, 60).map(x=>{
     if(!x.ok){
       return `<div class="ng">❌ ${escapeHtml(x.code)}</div>`;
     }
@@ -195,13 +212,21 @@ function renderPanels(){
   }).join("");
 }
 
-function renderRemainList(){
+/* ✅ 未取得：グリッド描画 */
+function renderRemainGrid(){
   if(!STORE) return;
   const remainRows = st.rows.filter(r => !st.okSet.has(normalize(r.code)));
-  const shown = remainRows.slice(0, 200);
-  el("remainList").textContent =
-    shown.map(r => `${r.code} ／ ${r.machine_name || "-"}`).join("\n") +
-    (remainRows.length > shown.length ? `\n...（残り ${remainRows.length - shown.length} 件省略）` : "");
+  const shown = remainRows.slice(0, 240);
+
+  el("remainList").innerHTML = shown.map(r=>`
+    <div class="remainItem">
+      <div class="c">${escapeHtml(r.code)}</div>
+      <div class="m">${escapeHtml(r.machine_name || "-")}</div>
+    </div>
+  `).join("") + (remainRows.length > shown.length
+      ? `<div class="remainItem"><div class="c">…</div><div class="m">残り ${remainRows.length - shown.length} 件省略</div></div>`
+      : "");
+
   el("remainCard").style.display = "";
   el("remainCard").scrollIntoView({ behavior:"smooth", block:"start" });
 }
@@ -228,22 +253,34 @@ function addScan(v){
   if(ok){
     const before = st.okSet.size;
     st.okSet.add(hitKey);
-    if(st.okSet.size > before) vibrateOk();
-    else { try{ if(navigator.vibrate) navigator.vibrate(40); }catch(_e){} }
+    if(st.okSet.size > before){
+      vibrateOk();
+      showToast(`✅ ${hitRow.code} ／ ${hitRow.machine_name || "-"}`);
+    }else{
+      // 同じものを再スキャンした時は弱め
+      try{ if(navigator.vibrate) navigator.vibrate(30); }catch(_e){}
+      showToast(`✅（再）${hitRow.code}`);
+    }
   }else{
     st.ngCount++;
+    showToast(`❌ 一致なし`);
   }
 
   st.scanned.unshift({ code: variants[0], row: hitRow, ok, ts: Date.now(), hitKey });
 
-  el("msg").textContent = ok ? "一致しました（済はグレー表示）" : "一致なし（リストにありません）";
+  el("msg").textContent = ok ? "一致しました（連続スキャン中）" : "一致なし（リストにありません）";
   renderPanels();
   showDoneIfComplete();
-  el("scanInput").focus();
 }
 
-/* ========= カメラ（全画面） ========= */
-let qr = null, camRunning = false;
+/* ========= カメラ（全画面・連続） ========= */
+let qr = null;
+let camRunning = false;
+
+// 連続検出のデバウンス用
+let lastAnyTs = 0;
+let lastText = "";
+let lastTextTs = 0;
 
 function openCamModal(){
   el("camModal").style.display = "block";
@@ -255,13 +292,45 @@ function closeCamModal(){
 }
 
 function makeQrbox(){
-  // シール比率 1.43 に近い 1.5
+  // シール比率 1.43 に近い 1.5 / 背景ノイズを減らすため少し小さめ
   const vw = Math.min(window.innerWidth, 700);
-  const w = Math.round(vw * 0.82);
+  const w = Math.round(vw * 0.74);
   const h = Math.round(w / 1.5);
-  const ww = Math.max(260, Math.min(w, 520));
-  const hh = Math.max(180, Math.min(h, 360));
+  const ww = Math.max(240, Math.min(w, 460));
+  const hh = Math.max(160, Math.min(h, 300));
   return { width: ww, height: hh };
+}
+
+/* 可能な範囲でカメラ制約を当てる（端末依存） */
+async function applyCameraTuning(){
+  if(!qr) return;
+
+  // 連続AF（効けば「タップで合う」が減る）
+  try{
+    await qr.applyVideoConstraints({
+      advanced: [
+        { focusMode: "continuous" },
+        { exposureMode: "continuous" }
+      ]
+    });
+  }catch(_e){}
+
+  // ズーム（スライダー値を適用）
+  await applyZoomFromUI();
+}
+
+async function applyZoomFromUI(){
+  if(!qr) return;
+  const z = Number(el("zoomRange")?.value || 1);
+  el("zoomVal").textContent = `${z.toFixed(1)}x`;
+
+  try{
+    await qr.applyVideoConstraints({
+      advanced: [{ zoom: z }]
+    });
+  }catch(_e){
+    // iOS等、zoom制約が効かない端末では無視
+  }
 }
 
 async function startCamera(){
@@ -269,12 +338,15 @@ async function startCamera(){
   if(camRunning) return;
 
   openCamModal();
+
   if(!qr) qr = new Html5Qrcode("qrReader");
 
   const config = {
-    fps: 10,
+    fps: 12,
     qrbox: makeQrbox(),
     disableFlip: true,
+    // ✅ 端末が対応していれば BarCodeDetector を使って高速・高精度に
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     formatsToSupport: [
       Html5QrcodeSupportedFormats.EAN_13,
       Html5QrcodeSupportedFormats.EAN_8,
@@ -285,18 +357,39 @@ async function startCamera(){
     ],
   };
 
-  const onOk = (text) => { stopCamera(); addScan(text); };
+  const onOk = (text) => {
+    const now = Date.now();
+
+    // 全体クールダウン（連打抑制）
+    if(now - lastAnyTs < ANY_CODE_COOLDOWN_MS) return;
+
+    const n = normalize(text);
+    if(!n) return;
+
+    // 同一コードの連続発火抑制（連続フレームで同じ値が来るのを抑える）
+    if(n === lastText && (now - lastTextTs) < SAME_CODE_COOLDOWN_MS) return;
+
+    lastAnyTs = now;
+    lastText = n;
+    lastTextTs = now;
+
+    addScan(text);
+
+    // ✅ 連続スキャン：止めない／閉じない
+  };
   const onErr = (_) => {};
 
   camRunning = true;
 
   try{
     await qr.start({facingMode:"environment"}, config, onOk, onErr);
+    await applyCameraTuning();
   }catch(e1){
     try{
       const cams = await Html5Qrcode.getCameras();
       const camId = cams[cams.length-1]?.id;
       await qr.start({deviceId:{exact:camId}}, config, onOk, onErr);
+      await applyCameraTuning();
     }catch(e2){
       camRunning = false;
       closeCamModal();
@@ -313,6 +406,9 @@ async function stopCamera(){
   try{ await qr.stop(); }catch(_){}
   camRunning = false;
   closeCamModal();
+
+  // 閉じたら入力に戻す
+  el("scanInput").focus();
 }
 
 /* ========= 起動 ========= */
@@ -330,6 +426,11 @@ async function stopCamera(){
     if(e.target === el("camModal")) stopCamera();
   });
 
+  // ズーム
+  el("zoomRange").addEventListener("input", () => {
+    applyZoomFromUI();
+  });
+
   // UI
   el("btnHome").onclick = () => location.href="./";
   el("btnClear").onclick = () => {
@@ -342,20 +443,21 @@ async function stopCamera(){
     hideDone();
     el("scanInput").focus();
   };
-  el("btnShowRemain").onclick = () => renderRemainList();
+  el("btnShowRemain").onclick = () => renderRemainGrid();
 
   el("scanInput").addEventListener("keydown", (e) => {
     if(e.key === "Enter"){
       e.preventDefault();
       addScan(el("scanInput").value);
       el("scanInput").value = "";
+      el("scanInput").focus();
     }
   });
 
   // iOSでフォーカスが外れやすい対策（軽め）
   document.addEventListener("touchstart", () => {
     const inp = el("scanInput");
-    if(document.activeElement !== inp) inp.focus();
+    if(document.activeElement !== inp && !camRunning) inp.focus();
   }, { passive: true });
 
   // DATA
