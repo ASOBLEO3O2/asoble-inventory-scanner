@@ -5,10 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>棚卸スキャナ</title>
 
-  <!-- CSS -->
   <link rel="stylesheet" href="./style.css" />
-
-  <!-- カメラ用ライブラリ（先読み） -->
   <script src="https://unpkg.com/html5-qrcode"></script>
 </head>
 
@@ -25,13 +22,11 @@
   </div>
 
   <main>
-    <!-- 店舗選択 -->
     <div id="home" class="card">
       <div class="muted small">店舗を選ぶとスキャン画面に移動します。</div>
       <div id="storeGrid" class="storeGrid"></div>
     </div>
 
-    <!-- スキャナ -->
     <div id="scanner" style="display:none">
       <div class="card">
         <button id="btnHome" class="secondary">店舗一覧</button>
@@ -42,10 +37,10 @@
       <div class="card">
         <p class="muted">
           ※ バーコードスキャナ運用推奨（Enterで確定）<br />
-          カメラは必要なときだけ全画面で起動します
+          カメラは全画面で連続スキャンします（読み取り後も閉じません）
         </p>
 
-        <button id="btnCamera">📷 カメラでスキャン（全画面）</button>
+        <button id="btnCamera">📷 カメラでスキャン（全画面・連続）</button>
 
         <div class="progressWrap">
           <div class="muted small" id="progressText">progress: -</div>
@@ -69,14 +64,13 @@
       <div class="card" id="remainCard" style="display:none">
         <strong>未スキャン一覧（この店舗）</strong>
         <div class="muted small" style="margin-top:6px">
-          残りを「管理No ／ マシン名」で表示（長い場合は一部省略）。
+          グリッド表示：管理No／マシン名
         </div>
-        <div id="remainList" class="remainList"></div>
+        <div id="remainList" class="remainGrid"></div>
       </div>
     </div>
   </main>
 
-  <!-- 棚卸完了 -->
   <div id="doneOverlay">
     <div id="doneCard">
       <div id="doneTitle">棚卸完了！🎉</div>
@@ -88,8 +82,19 @@
   <!-- カメラ全画面モーダル -->
   <div id="camModal" aria-hidden="true">
     <div id="camTop">
-      <div id="camHint">シール（5×3.5cm）を枠に入れるだけでOK</div>
-      <button id="camClose" class="secondary">⏹ 閉じる</button>
+      <div class="camTopLeft">
+        <div id="camHint">シール（5×3.5cm）を枠に入れるだけでOK</div>
+        <div class="camSubHint">※ 15〜25cm目安／タップ不要でAFを維持</div>
+      </div>
+
+      <div class="camTopRight">
+        <div class="zoomBox">
+          <span class="zoomLabel">ZOOM</span>
+          <input id="zoomRange" type="range" min="1" max="3" step="0.1" value="1" />
+          <span id="zoomVal" class="zoomVal">1.0x</span>
+        </div>
+        <button id="camClose" class="secondary">⏹ 閉じる</button>
+      </div>
     </div>
 
     <div id="qrReader"></div>
@@ -100,9 +105,12 @@
       <div class="corner br"></div>
       <div class="corner bl"></div>
     </div>
+
+    <!-- 成功トースト -->
+    <div id="toast" class="toast" aria-hidden="true"></div>
   </div>
 
-  <!-- JS -->
   <script src="./app.js"></script>
 </body>
 </html>
+
