@@ -24,11 +24,11 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
 /* 赤いスキャンライン（※目安） */
 #qrReader::after{
   content:"";position:absolute;top:50%;left:8%;width:84%;height:2px;
-  background:#ff3b30;pointer-events:none;opacity:.95
+  background:#ff3b30;pointer-events:none;opacity:.45
 }
 /* 説明 */
 #qrReader::before{
-  content:"赤い線は目安です（多少ずれてもOK）";
+  content:"枠の中にシール全体が入ればOK（赤線は目安）";
   position:absolute;top:10px;width:100%;
   text-align:center;font-size:13px;color:#ff6b6b;pointer-events:none
 }
@@ -85,18 +85,14 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
   border-color:#1f6f3a;background:#07140d;
 }
 .hitRow.done{
-  opacity:.45;               /* グレーアウト */
+  opacity:.45;
   filter:grayscale(1);
 }
 .hitRow .meta{
   display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;
 }
-.hitRow .code{
-  font-weight:800;
-}
-.hitRow .machine{
-  color:#cbd5e1;
-}
+.hitRow .code{font-weight:800}
+.hitRow .machine{color:#cbd5e1}
 .hitRow .tag{
   font-size:12px;padding:2px 8px;border-radius:999px;background:#0f172a;border:1px solid #334155;color:#cbd5e1;
 }
@@ -197,7 +193,7 @@ const st = {
   rows: [],
   byCode: new Map(),      // normalized-code -> row
   scanned: [],            // {code, row, ok, ts, hitKey}
-  okSet: new Set(),       // normalized-code (hit) の集合（重複カウント防止）
+  okSet: new Set(),       // normalized(code) の集合（重複カウント防止）
   ngCount: 0              // 不一致カウント
 };
 
@@ -325,9 +321,9 @@ function escapeHtml(s){
     .replaceAll("'","&#39;");
 }
 
-function renderHitRow(row, hitKey){
-  const code = normalize(row.code);
-  const done = st.okSet.has(code);
+function renderHitRow(row){
+  const codeKey = normalize(row.code);
+  const done = st.okSet.has(codeKey);
   const cls = `hitRow okRow ${done ? "done" : ""}`;
   return `
     <div class="${cls}">
@@ -374,7 +370,7 @@ function renderPanels(){
   if(!last){
     el("current").innerHTML = "";
   }else if(last.ok){
-    el("current").innerHTML = renderHitRow(last.row, last.hitKey);
+    el("current").innerHTML = renderHitRow(last.row);
   }else{
     el("current").innerHTML = `<div class="ng">❌ ${escapeHtml(last.code)}</div>`;
   }
@@ -436,15 +432,13 @@ function addScan(v){
   const ok = !!hitRow;
 
   if(ok){
-    // 同じものを二重にカウントしない（既に済でもokSetはそのまま）
     const before = st.okSet.size;
     st.okSet.add(hitKey);
 
-    // ✅ 成功フィードバック（初回ヒットのみ強く）
+    // 初回ヒットだけしっかりバイブ
     if(st.okSet.size > before){
       vibrateOk();
     }else{
-      // 既に済の再スキャンは軽め（任意）
       try{ if(navigator.vibrate) navigator.vibrate(40); }catch(_e){}
     }
   }else{
@@ -465,8 +459,21 @@ function addScan(v){
   el("scanInput").focus();
 }
 
-/* ========= カメラ（安定版） ========= */
+/* ========= カメラ（シール比率 5cm:3.5cm ≒ 1.43 に寄せる） ========= */
 let qr=null, camRunning=false;
+
+function makeQrbox(){
+  // 画面サイズに合わせて自動調整
+  const vw = Math.min(window.innerWidth, 700);
+  const w = Math.round(vw * 0.86);          // 画面の86%
+  const ratio = 1.5;                        // シール(1.43)に近い 1.5 を採用（少し余裕）
+  const h = Math.round(w / ratio);
+
+  // 上限/下限（読み取り安定のため）
+  const ww = Math.max(260, Math.min(w, 520));
+  const hh = Math.max(180, Math.min(h, 360));
+  return { width: ww, height: hh };
+}
 
 async function startCamera(){
   if(!STORE){
@@ -479,9 +486,8 @@ async function startCamera(){
   if(!qr) qr=new Html5Qrcode("qrReader");
 
   const config={
-    fps:12,
-    // ✅ 横長枠（バーコード向け）
-    qrbox:{width:420,height:140},
+    fps: 10,                 // 安定優先
+    qrbox: makeQrbox(),       // ✅ シール比率に寄せた枠
     disableFlip:true,
     formatsToSupport:[
       Html5QrcodeSupportedFormats.EAN_13,
