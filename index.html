@@ -6,60 +6,281 @@
   <title>棚卸スキャナ</title>
   <style>
     body{font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif;background:#0b0f17;color:#e8eefc;margin:0}
-    .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
-    .top{display:flex;gap:12px;align-items:center;justify-content:space-between}
-    .card{background:#11182a;border:1px solid #22304f;border-radius:14px;padding:14px}
-    input{width:100%;padding:14px 12px;border-radius:12px;border:1px solid #2b3a60;background:#0b1020;color:#e8eefc;font-size:18px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
-    .list{height:420px;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.4}
-    .ok{color:#7CFF8A}
-    .ng{color:#FF7C7C}
-    .muted{color:#9bb0d6}
-    button{padding:10px 12px;border-radius:12px;border:1px solid #2b3a60;background:#162242;color:#e8eefc;cursor:pointer}
-    button:hover{filter:brightness(1.1)}
-    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-    .badge{padding:4px 10px;border-radius:999px;background:#162242;border:1px solid #2b3a60}
+    .wrap{max-width:1100px;margin:18px auto;padding:0 14px}
+    .top{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .badge{padding:6px 10px;border-radius:999px;background:#162242;border:1px solid #2b3a60;font-size:13px}
+    .btn{padding:10px 12px;border-radius:12px;border:1px solid #2b3a60;background:#162242;color:#e8eefc;cursor:pointer}
+    .btn:active{transform:scale(0.99)}
+    .card{background:#11182a;border:1px solid #22304f;border-radius:16px;padding:14px;margin-top:12px}
+    input{width:100%;padding:16px 12px;border-radius:14px;border:1px solid #2b3a60;background:#0b1020;color:#e8eefc;font-size:18px}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px}
+    @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
+    .list{height:46vh;min-height:280px;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.45}
+    .ok{color:#7CFF8A}.ng{color:#FF7C7C}.muted{color:#9bb0d6}
+    .storeGrid{display:grid;grid-template-columns:1fr;gap:10px}
+    @media(min-width:680px){.storeGrid{grid-template-columns:1fr 1fr}}
+    a.storeCard{display:block;text-decoration:none;color:inherit;background:#11182a;border:1px solid #22304f;border-radius:16px;padding:14px}
+    a.storeCard:active{transform:scale(0.99)}
+    .storeName{font-weight:800;font-size:18px}
+    .pill{display:inline-block;margin-top:10px;padding:4px 10px;border-radius:999px;background:#162242;border:1px solid #2b3a60;font-size:12px}
+    .sep{height:12px}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="top">
       <div class="row">
-        <h2 style="margin:0">棚卸スキャナ</h2>
+        <b id="title">棚卸スキャナ</b>
         <span class="badge" id="storeBadge">store: -</span>
         <span class="badge" id="countBadge">rows: -</span>
         <span class="badge" id="updatedBadge">updated: -</span>
       </div>
       <div class="row">
-        <button id="btnClear">今回分をクリア</button>
+        <button class="btn" id="btnHome">店舗一覧</button>
+        <button class="btn" id="btnClear">今回をクリア</button>
       </div>
     </div>
 
-    <div class="card" style="margin-top:12px">
-      <div class="muted" style="margin-bottom:8px">※ バーコードスキャナ（キーボード入力）→ Enter で確定。ここにフォーカスしたまま運用。</div>
-      <input id="scanInput" placeholder="ここにフォーカス → スキャン..." autocomplete="off" />
-      <div id="msg" class="muted" style="margin-top:8px"></div>
+    <div id="home" class="card" style="display:none">
+      <div class="muted">店舗を選ぶとスキャン画面に移動します（同じページ内で切替）。</div>
+      <div class="sep"></div>
+      <div class="storeGrid" id="storeGrid"></div>
     </div>
 
-    <div class="grid">
+    <div id="scanner" style="display:none">
       <div class="card">
-        <div class="row" style="justify-content:space-between">
-          <b>現在の一致</b>
-          <span class="badge" id="hitBadge">-</span>
-        </div>
-        <div id="current" class="list" style="margin-top:10px"></div>
+        <div class="muted">※ スキャナ（キーボード入力）→ Enterで確定。ここにフォーカスしたまま運用。</div>
+        <div style="height:8px"></div>
+        <input id="scanInput" inputmode="none" placeholder="ここにフォーカス → スキャン..." autocomplete="off" />
+        <div id="msg" class="muted" style="margin-top:10px"></div>
       </div>
-      <div class="card">
-        <div class="row" style="justify-content:space-between">
-          <b>スキャン履歴（今回）</b>
-          <span class="badge" id="historyBadge">0</span>
+
+      <div class="grid">
+        <div class="card">
+          <div class="row" style="justify-content:space-between">
+            <b>現在の一致</b><span class="badge" id="hitBadge">-</span>
+          </div>
+          <div id="current" class="list" style="margin-top:10px"></div>
         </div>
-        <div id="history" class="list" style="margin-top:10px"></div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between">
+            <b>スキャン履歴（今回）</b><span class="badge" id="historyBadge">0</span>
+          </div>
+          <div id="history" class="list" style="margin-top:10px"></div>
+        </div>
       </div>
     </div>
   </div>
 
-  <script src="./app.js"></script>
+<script>
+  const DATA_CSV_URL =
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
+
+  const el = (id) => document.getElementById(id);
+  const qs = new URLSearchParams(location.search);
+
+  let STORE = (qs.get("store") || "").trim(); // 空=店舗一覧
+  const st = { all: [], rows: [], byCode: new Map(), scanned: [] };
+
+  function normalizeCode(v){
+    return String(v ?? "")
+      .trim()
+      .replace(/\r?\n/g,"")
+      .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+  }
+
+  function parseCSV(text) {
+    const rows = [];
+    let row = [];
+    let cur = "";
+    let inQ = false;
+    const s = text.replace(/\r/g, "");
+
+    for (let i=0;i<s.length;i++){
+      const ch = s[i];
+      if (inQ){
+        if (ch === '"'){
+          if (s[i+1] === '"'){ cur += '"'; i++; }
+          else inQ = false;
+        } else cur += ch;
+        continue;
+      }
+      if (ch === '"') inQ = true;
+      else if (ch === ','){ row.push(cur); cur=""; }
+      else if (ch === '\n'){
+        row.push(cur); cur="";
+        if (row.some(v=>v!=="")) rows.push(row);
+        row=[];
+      } else cur += ch;
+    }
+    row.push(cur);
+    if (row.some(v=>v!=="")) rows.push(row);
+
+    if (!rows.length) return [];
+
+    const header = rows.shift().map(x => String(x).trim());
+    const idx = {};
+    header.forEach((h,i)=>idx[h]=i);
+    const pick = (cols,key)=> (idx[key]==null) ? "" : (cols[idx[key]] ?? "");
+
+    return rows.map(cols => ({
+      store_key: pick(cols,"store_key"),
+      store_name: pick(cols,"store_name"),
+      code: pick(cols,"code"),
+      machine_name: pick(cols,"machine_name"),
+      actual_stock: pick(cols,"actual_stock"),
+      updated_at: pick(cols,"updated_at"),
+    }));
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;").replaceAll("'","&#39;");
+  }
+
+  function fmt(ts){ return new Date(ts).toLocaleString("ja-JP"); }
+
+  function setMode(mode){
+    el("home").style.display = (mode==="home") ? "" : "none";
+    el("scanner").style.display = (mode==="scanner") ? "" : "none";
+  }
+
+  function updateBadges(){
+    el("storeBadge").textContent = "store: " + (STORE || "HOME");
+    el("countBadge").textContent = "rows: " + (STORE ? st.rows.length : "-");
+    const u = st.rows[0]?.updated_at || st.all[0]?.updated_at || "-";
+    el("updatedBadge").textContent = "updated: " + (u ? String(u).slice(0,10) : "-");
+    el("historyBadge").textContent = String(st.scanned.length);
+  }
+
+  function renderHome(){
+    setMode("home");
+    el("title").textContent = "棚卸スキャナ（店舗選択）";
+    st.scanned = [];
+    updateBadges();
+
+    // store一覧をDATAから自動抽出
+    const map = new Map(); // key -> name
+    for (const r of st.all){
+      if (!r.store_key) continue;
+      if (!map.has(r.store_key)) map.set(r.store_key, r.store_name || r.store_key);
+    }
+
+    const items = [...map.entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1]),"ja"));
+    el("storeGrid").innerHTML = items.map(([key,name]) => {
+      const href = `?store=${encodeURIComponent(key)}`;
+      return `<a class="storeCard" href="${href}">
+        <div class="storeName">${escapeHtml(name)}</div>
+        <div class="muted">store_key: ${escapeHtml(key)}</div>
+        <div class="pill">スキャンへ</div>
+      </a>`;
+    }).join("");
+  }
+
+  function renderScanner(){
+    setMode("scanner");
+    el("title").textContent = "棚卸スキャナ";
+    updateBadges();
+
+    const input = el("scanInput");
+    input.focus();
+    document.addEventListener("touchstart", () => input.focus(), { passive:true });
+
+    el("msg").textContent = "読込完了。入力欄にフォーカスしてスキャンしてください。";
+
+    renderScanPanels();
+  }
+
+  function renderScanPanels(){
+    updateBadges();
+
+    const last = st.scanned[0];
+    if (!last){
+      el("hitBadge").textContent = "-";
+      el("current").textContent = "";
+    } else if (last.ok){
+      el("hitBadge").textContent = "HIT";
+      const r = last.row;
+      el("current").innerHTML =
+        `<div class="ok">✅ ${escapeHtml(last.code)}</div>` +
+        `<div>店舗: ${escapeHtml(r.store_name)} (${escapeHtml(r.store_key)})</div>` +
+        `<div>マシン: ${escapeHtml(r.machine_name)}</div>` +
+        `<div>実在庫: ${escapeHtml(r.actual_stock)}</div>`;
+    } else {
+      el("hitBadge").textContent = "NO HIT";
+      el("current").innerHTML = `<div class="ng">❌ ${escapeHtml(last.code)}</div>`;
+    }
+
+    el("history").innerHTML = st.scanned.map(x=>{
+      const head = x.ok ? `<span class="ok">✅</span>` : `<span class="ng">❌</span>`;
+      const tail = x.ok ? ` ${escapeHtml(x.row.machine_name)}` : "";
+      return `${head} ${escapeHtml(x.code)}  <span class="muted">${fmt(x.ts)}</span>${tail}`;
+    }).join("\n");
+  }
+
+  function setStore(key){
+    STORE = key;
+    if (!STORE){
+      history.replaceState(null,"","./");
+      renderHome();
+      return;
+    }
+    history.replaceState(null,"",`?store=${encodeURIComponent(STORE)}`);
+    // 絞り込み
+    st.rows = st.all.filter(r => String(r.store_key).trim() === STORE);
+    st.byCode.clear();
+    for (const r of st.rows){
+      const k = normalizeCode(r.code);
+      if (k) st.byCode.set(k, r);
+    }
+    st.scanned = [];
+    renderScanner();
+  }
+
+  function addScan(v){
+    const c = normalizeCode(v);
+    if (!c) return;
+    const row = st.byCode.get(c);
+    st.scanned.unshift({ ts: Date.now(), code: c, ok: !!row, row });
+    el("msg").textContent = row ? "一致しました" : "一致なし（リストにありません）";
+    renderScanPanels();
+  }
+
+  async function boot(){
+    el("btnHome").addEventListener("click", ()=>setStore(""));
+    el("btnClear").addEventListener("click", ()=>{
+      st.scanned = [];
+      el("msg").textContent = "今回分をクリアしました";
+      renderScanPanels();
+      el("scanInput").focus();
+    });
+
+    el("scanInput").addEventListener("keydown",(e)=>{
+      if (e.key === "Enter"){
+        e.preventDefault();
+        addScan(el("scanInput").value);
+        el("scanInput").value = "";
+      }
+    });
+
+    // データ取得
+    const res = await fetch(DATA_CSV_URL, { cache:"no-store" });
+    if (!res.ok) throw new Error("CSV取得に失敗: " + res.status);
+    const text = await res.text();
+    st.all = parseCSV(text);
+
+    // 初期表示
+    const initial = (new URLSearchParams(location.search)).get("store") || "";
+    setStore(initial.trim());
+  }
+
+  boot().catch(err=>{
+    setMode("scanner");
+    el("msg").textContent = "エラー: " + err.message;
+  });
+</script>
 </body>
 </html>
 
