@@ -25,7 +25,6 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
   content:"";position:absolute;top:50%;left:8%;width:84%;height:2px;
   background:#ff3b30;pointer-events:none;opacity:.95
 }
-/* 説明 */
 #qrReader::before{
   content:"赤い線にバーコードを合わせてください";
   position:absolute;top:10px;width:100%;
@@ -95,7 +94,6 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
   </div>
 
 </div>
-
 </main>
 
 <script>
@@ -114,7 +112,7 @@ const normalize = (s) => String(s || "").trim()
   .replace(/\r?\n/g, "")
   .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
 
-/* ========= CSV（簡易：今回のDATAはカンマや改行が入らない想定） ========= */
+/* ========= CSV ========= */
 function parseCSV(t){
   const lines = t.replace(/\r/g,"").split("\n").filter(Boolean);
   if(!lines.length) return [];
@@ -137,133 +135,66 @@ function parseCSV(t){
   });
 }
 
-/* ========= 画面 ========= */
-function setMode(mode){
-  el("home").style.display = (mode === "home") ? "" : "none";
-  el("scanner").style.display = (mode === "scan") ? "" : "none";
+/* ========= UI ========= */
+function setMode(m){
+  el("home").style.display = (m==="home")?"":"none";
+  el("scanner").style.display = (m==="scan")?"":"none";
 }
-
 function updateBadges(){
-  el("storeBadge").textContent = "store: " + (STORE || "HOME");
-  el("countBadge").textContent = "rows: " + (STORE ? st.rows.length : "-");
-
-  const total = STORE ? st.rows.length : 0;
-  const done = new Set(st.scanned.filter(x=>x.ok).map(x=>x.code)).size;
-  el("progressBadge").textContent = STORE ? `progress: ${done}/${total}` : "progress: -";
-
-  const u = st.rows[0]?.updated_at || st.all[0]?.updated_at || "-";
-  el("updatedBadge").textContent = "updated: " + String(u).slice(0, 10);
+  el("storeBadge").textContent="store: "+(STORE||"HOME");
+  el("countBadge").textContent="rows: "+(STORE?st.rows.length:"-");
+  const done=new Set(st.scanned.filter(x=>x.ok).map(x=>x.code)).size;
+  el("progressBadge").textContent=STORE?`progress: ${done}/${st.rows.length}`:"progress: -";
+  el("updatedBadge").textContent="updated: "+String(st.rows[0]?.updated_at||st.all[0]?.updated_at||"-").slice(0,10);
 }
-
 function renderHome(){
   setMode("home");
-  el("title").textContent = "棚卸スキャナ（店舗選択）";
-
-  const map = new Map();
-  for(const r of st.all){
-    if(!r.store_key) continue;
-    if(!map.has(r.store_key)) map.set(r.store_key, r.store_name || r.store_key);
-  }
-
-  el("storeGrid").innerHTML = [...map.entries()]
-    .sort((a,b)=>String(a[1]).localeCompare(String(b[1]),"ja"))
-    .map(([k,n])=> `<a class="storeCard" href="?store=${encodeURIComponent(k)}">
-        <b>${n}</b><div class="muted">${k}</div>
-      </a>`).join("");
-
+  const map=new Map();
+  for(const r of st.all){ if(r.store_key&&!map.has(r.store_key)) map.set(r.store_key,r.store_name||r.store_key); }
+  el("storeGrid").innerHTML=[...map.entries()].map(([k,n])=>`
+    <a class="storeCard" href="?store=${encodeURIComponent(k)}">
+      <b>${n}</b><div class="muted">${k}</div>
+    </a>`).join("");
   updateBadges();
 }
-
 function renderScan(){
   setMode("scan");
-  el("title").textContent = "棚卸スキャナ";
-  el("msg").textContent = "読込完了。入力欄にフォーカスしてスキャンしてください。";
-  updateBadges();
-  el("scanInput").focus();
+  el("msg").textContent="読込完了。入力欄にフォーカスしてスキャンしてください。";
+  updateBadges(); el("scanInput").focus();
 }
-
 function renderPanels(){
   updateBadges();
-
-  const last = st.scanned[0];
-  if(!last){
-    el("current").innerHTML = "";
-  }else if(last.ok){
-    el("current").innerHTML =
-      `<div class="ok">✅ ${last.code}</div>` +
-      `<div>マシン: ${last.row.machine_name}</div>`;
-  }else{
-    el("current").innerHTML = `<div class="ng">❌ ${last.code}</div>`;
-  }
-
-  el("history").innerHTML = st.scanned.map(x=>{
-    return x.ok
-      ? `<div class="ok">✅ ${x.code} <span class="muted"> ${x.row.machine_name}</span></div>`
-      : `<div class="ng">❌ ${x.code}</div>`;
-  }).join("");
+  const last=st.scanned[0];
+  el("current").innerHTML=!last?"":last.ok?
+    `<div class="ok">✅ ${last.code}</div><div>${last.row.machine_name}</div>`:
+    `<div class="ng">❌ ${last.code}</div>`;
+  el("history").innerHTML=st.scanned.map(x=>x.ok?
+    `<div class="ok">✅ ${x.code} <span class="muted">${x.row.machine_name}</span></div>`:
+    `<div class="ng">❌ ${x.code}</div>`).join("");
 }
 
 /* ========= スキャン ========= */
 function addScan(v){
-  const code = normalize(v);
-  if(!code) return;
-
-  const row = st.byCode.get(code);
-  const ok = !!row;
-
-  st.scanned.unshift({ code, row, ok, ts: Date.now() });
-
-  el("msg").textContent = ok ? "一致しました" : "一致なし（リストにありません）";
-  renderPanels();
-  el("scanInput").focus();
+  const code=normalize(v); if(!code) return;
+  const row=st.byCode.get(code); const ok=!!row;
+  st.scanned.unshift({code,row,ok,ts:Date.now()});
+  el("msg").textContent=ok?"一致しました":"一致なし（リストにありません）";
+  renderPanels(); el("scanInput").focus();
 }
 
-/* ========= カメラ ========= */
-let qr = null;
-let camRunning = false;
+/* ========= カメラ（安定版） ========= */
+let qr=null, camRunning=false;
 
 async function startCamera(){
-  if(!STORE){
-    alert("先に店舗を選択してください");
-    return;
-  }
-  if(camRunning) return;
+  if(!STORE||camRunning) return;
+  el("cameraWrap").style.display="";
+  if(!qr) qr=new Html5Qrcode("qrReader");
 
-  el("cameraWrap").style.display = "";
-
-  if(!qr) qr = new Html5Qrcode("qrReader");
-
-  let cams = [];
-  try {
-    cams = await Html5Qrcode.getCameras();
-  } catch (e) {
-    el("cameraWrap").style.display = "none";
-    alert("カメラ取得に失敗しました（権限/HTTPSを確認）");
-    return;
-  }
-
-  if(!cams || cams.length === 0){
-    el("cameraWrap").style.display = "none";
-    alert("カメラが見つかりません");
-    return;
-  }
-
-  // ✅ 背面カメラ優先（labelが空の時は末尾を使う）
-  let cameraId = null;
-  for(const cam of cams){
-    if(/back|rear|environment/i.test(cam.label || "")){
-      cameraId = cam.id;
-      break;
-    }
-  }
-  if(!cameraId) cameraId = cams[cams.length - 1].id;
-
-  // ✅ 1Dバーコード向け設定
-  const config = {
-    fps: 12,
-    qrbox: { width: 360, height: 120 },
-    disableFlip: true,
-    formatsToSupport: [
+  const config={
+    fps:12,
+    qrbox:{width:360,height:120},
+    disableFlip:true,
+    formatsToSupport:[
       Html5QrcodeSupportedFormats.EAN_13,
       Html5QrcodeSupportedFormats.EAN_8,
       Html5QrcodeSupportedFormats.UPC_A,
@@ -273,113 +204,45 @@ async function startCamera(){
     ],
   };
 
-  const onOk = (text) => {
-    stopCamera();
-    addScan(text);
-  };
-  const onErr = (_err) => {};
+  const onOk=(text)=>{ stopCamera(); addScan(text); };
+  const onErr=(_)=>{};
 
-  camRunning = true;
-
-  try {
-    // ✅ まずは背面指定（iPhoneで安定しやすい）
-    await qr.start({ facingMode: "environment" }, config, onOk, onErr);
-  } catch (e1) {
-    try {
-      // ✅ だめなら deviceId で確実に背面っぽいカメラへ
-      await qr.start({ deviceId: { exact: cameraId } }, config, onOk, onErr);
-    } catch (e2) {
-      // ✅ どっちも失敗：後始末
-      camRunning = false;
-      el("cameraWrap").style.display = "none";
-      alert("カメラ起動に失敗しました（Safariの権限/別タブ起動/再読み込みを試してください）");
-    }
+  camRunning=true;
+  try{
+    await qr.start({facingMode:"environment"},config,onOk,onErr);
+  }catch(e){
+    const cams=await Html5Qrcode.getCameras();
+    const camId=cams[cams.length-1]?.id;
+    await qr.start({deviceId:{exact:camId}},config,onOk,onErr);
   }
-}
-
-await qr.start(
-  { facingMode: "environment" }, // ✅ 背面カメラ優先（iPhoneで安定しやすい）
-  {
-    fps: 12,
-    qrbox: { width: 360, height: 120 }, // ✅ 横長バーコード向け
-    disableFlip: true,
-    formatsToSupport: [
-      Html5QrcodeSupportedFormats.EAN_13,
-      Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.UPC_A,
-      Html5QrcodeSupportedFormats.UPC_E,
-      Html5QrcodeSupportedFormats.CODE_128,
-      Html5QrcodeSupportedFormats.CODE_39,
-    ],
-  },
-  (text) => {
-    stopCamera();
-    addScan(text);
-  },
-  (_err) => {}
-);
-
- 
 }
 
 async function stopCamera(){
-  el("cameraWrap").style.display = "none";
-  if(!qr || !camRunning) return;
-  try{
-    await qr.stop();
-  }catch(_e){
-    // iOSでたまにstop例外になるが無視でOK
-  }finally{
-    camRunning = false;
-  }
+  el("cameraWrap").style.display="none";
+  if(!qr||!camRunning) return;
+  try{ await qr.stop(); }catch(_){}
+  camRunning=false;
 }
 
 /* ========= 起動 ========= */
-(async () => {
-  // UI
-  el("btnHome").onclick = () => location.href = "./";
-  el("btnClear").onclick = () => { st.scanned = []; renderPanels(); el("msg").textContent = "今回分をクリアしました"; };
-  el("btnCamera").onclick = () => startCamera();
-  el("btnStopCamera").onclick = () => stopCamera();
-
-  el("scanInput").addEventListener("keydown", (e) => {
-    if(e.key === "Enter"){
-      e.preventDefault();
-      addScan(el("scanInput").value);
-      el("scanInput").value = "";
-    }
+(async()=>{
+  el("btnHome").onclick=()=>location.href="./";
+  el("btnClear").onclick=()=>{st.scanned=[];renderPanels();};
+  el("btnCamera").onclick=()=>startCamera();
+  el("btnStopCamera").onclick=()=>stopCamera();
+  el("scanInput").addEventListener("keydown",e=>{
+    if(e.key==="Enter"){e.preventDefault();addScan(el("scanInput").value);el("scanInput").value="";}
   });
 
-  // iOSでフォーカスが外れやすい対策（軽め）
-  document.addEventListener("touchstart", () => {
-    const inp = el("scanInput");
-    if(document.activeElement !== inp) inp.focus();
-  }, { passive: true });
+  const csv=await fetch(DATA_CSV_URL,{cache:"no-store"}).then(r=>r.text());
+  st.all=parseCSV(csv);
 
-  // DATA
-  const csvText = await fetch(DATA_CSV_URL, { cache: "no-store" }).then(r => r.text());
-  st.all = parseCSV(csvText);
+  if(!STORE){ renderHome(); return; }
 
-  // 初期store
-  const init = (new URLSearchParams(location.search)).get("store") || "";
-  STORE = init.trim();
-
-  if(!STORE){
-    renderHome();
-    return;
-  }
-
-  st.rows = st.all.filter(r => String(r.store_key).trim() === STORE);
-  st.byCode.clear();
-  for(const r of st.rows){
-    const k = normalize(r.code);
-    if(k) st.byCode.set(k, r);
-  }
-
-  renderScan();
-  renderPanels();
+  st.rows=st.all.filter(r=>r.store_key===STORE);
+  st.byCode.clear(); st.rows.forEach(r=>st.byCode.set(normalize(r.code),r));
+  renderScan(); renderPanels();
 })();
 </script>
-
 </body>
 </html>
