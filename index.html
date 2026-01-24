@@ -4,8 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>棚卸スキャナ</title>
-
-<!-- カメラ用ライブラリ -->
 <script src="https://unpkg.com/html5-qrcode"></script>
 
 <style>
@@ -18,83 +16,81 @@ button.secondary{background:#334155}
 main{padding:14px}
 .card{background:#111827;border-radius:14px;padding:14px;margin-bottom:14px}
 input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid #334155;background:#020617;color:#fff}
-#qrReader{width:100%;height:52vh;position:relative;margin-top:10px}
 .small{font-size:13px}
-
-/* 赤いスキャンライン（※目安） */
-#qrReader::after{
-  content:"";position:absolute;top:50%;left:8%;width:84%;height:2px;
-  background:#ff3b30;pointer-events:none;opacity:.45
-}
-/* 説明 */
-#qrReader::before{
-  content:"枠の中にシール全体が入ればOK（赤線は目安）";
-  position:absolute;top:10px;width:100%;
-  text-align:center;font-size:13px;color:#ff6b6b;pointer-events:none
-}
-
 .ok{color:#22c55e}
 .ng{color:#ef4444}
-.warn{color:#fbbf24}
 .muted{color:#94a3b8;white-space:pre-line}
-.storeCard{
-  display:block;background:#020617;border-radius:12px;padding:14px;
-  margin-bottom:10px;text-decoration:none;color:#fff
-}
+.storeCard{display:block;background:#020617;border-radius:12px;padding:14px;margin-bottom:10px;text-decoration:none;color:#fff}
 
 /* 進捗バー */
 .progressWrap{margin-top:10px}
-.progressBar{
-  width:100%;
-  height:12px;
-  background:#0b1020;
-  border:1px solid #334155;
-  border-radius:999px;
-  overflow:hidden;
-}
-.progressFill{
-  height:100%;
-  width:0%;
-  background:#22c55e;
-}
+.progressBar{width:100%;height:12px;background:#0b1020;border:1px solid #334155;border-radius:999px;overflow:hidden}
+.progressFill{height:100%;width:0%;background:#22c55e}
 
 /* 完了オーバーレイ */
-#doneOverlay{
-  position:fixed;inset:0;
-  display:none;
-  background:rgba(0,0,0,.55);
-  align-items:center;justify-content:center;
-  z-index:9999;
-}
-#doneCard{
-  width:min(560px, calc(100vw - 28px));
-  background:#111827;
-  border:1px solid #334155;
-  border-radius:18px;
-  padding:18px;
-  text-align:center;
-}
+#doneOverlay{position:fixed;inset:0;display:none;background:rgba(0,0,0,.55);align-items:center;justify-content:center;z-index:9999}
+#doneCard{width:min(560px, calc(100vw - 28px));background:#111827;border:1px solid #334155;border-radius:18px;padding:18px;text-align:center}
 #doneTitle{font-size:22px;font-weight:800;margin-bottom:6px}
 #doneSub{color:#94a3b8;margin-bottom:14px}
 
-/* ===== スキャン済みグレーアウト ===== */
-.hitRow{
-  padding:8px 10px;border-radius:12px;border:1px solid #334155;background:#0b1220;
-}
-.hitRow.okRow{
-  border-color:#1f6f3a;background:#07140d;
-}
-.hitRow.done{
-  opacity:.45;
-  filter:grayscale(1);
-}
-.hitRow .meta{
-  display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;
-}
+/* スキャン済みグレーアウト */
+.hitRow{padding:8px 10px;border-radius:12px;border:1px solid #334155;background:#0b1220}
+.hitRow.okRow{border-color:#1f6f3a;background:#07140d}
+.hitRow.done{opacity:.45;filter:grayscale(1)}
+.hitRow .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
 .hitRow .code{font-weight:800}
 .hitRow .machine{color:#cbd5e1}
-.hitRow .tag{
-  font-size:12px;padding:2px 8px;border-radius:999px;background:#0f172a;border:1px solid #334155;color:#cbd5e1;
+.hitRow .tag{font-size:12px;padding:2px 8px;border-radius:999px;background:#0f172a;border:1px solid #334155;color:#cbd5e1}
+
+/* ===== カメラ全画面モーダル ===== */
+#camModal{
+  position:fixed; inset:0;
+  display:none;
+  background:#000;
+  z-index:9998;
+}
+#camTop{
+  position:absolute; top:0; left:0; right:0;
+  display:flex; gap:10px; align-items:center; justify-content:space-between;
+  padding:10px;
+  background:linear-gradient(to bottom, rgba(0,0,0,.7), rgba(0,0,0,0));
+  z-index:2;
+}
+#camHint{
+  font-size:13px; color:#e5e7eb; opacity:.9;
+}
+#camClose{
+  background:#334155;
+}
+#qrReader{
+  position:absolute; inset:0;
+}
+
+/* コーナーガイド（線に囚われない） */
+#qrReader::before{
+  content:"シール全体を枠の中へ（赤線は目安）";
+  position:absolute; top:56px; left:0; right:0;
+  text-align:center; font-size:13px; color:#ff9aa2;
+  z-index:3; pointer-events:none;
+}
+/* 赤線は目安で薄め */
+#qrReader::after{
+  content:""; position:absolute; top:50%; left:10%;
+  width:80%; height:2px; background:#ff3b30; opacity:.35;
+  z-index:3; pointer-events:none;
+}
+/* 四隅コーナー */
+.corner{position:absolute;width:34px;height:34px;border:3px solid rgba(34,197,94,.85);border-right:none;border-bottom:none;border-radius:10px;z-index:3;pointer-events:none}
+.corner.tr{right:14px;top:120px;transform:rotate(90deg)}
+.corner.br{right:14px;bottom:14px;transform:rotate(180deg)}
+.corner.bl{left:14px;bottom:14px;transform:rotate(270deg)}
+.corner.tl{left:14px;top:120px}
+#camFrame{
+  position:absolute;
+  left:14px; right:14px;
+  top:120px; bottom:14px;
+  z-index:2;
+  pointer-events:none;
 }
 </style>
 </head>
@@ -112,61 +108,53 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
 </div>
 
 <main>
-
-<!-- 店舗選択 -->
-<div id="home" class="card">
-  <div class="muted small">店舗を選ぶとスキャン画面に移動します。</div>
-  <div id="storeGrid" style="margin-top:10px"></div>
-</div>
-
-<!-- スキャナ -->
-<div id="scanner" style="display:none">
-
-  <div class="card">
-    <button id="btnHome" class="secondary">店舗一覧</button>
-    <button id="btnClear" class="secondary">今回をクリア</button>
-    <button id="btnShowRemain" class="secondary">未スキャン一覧</button>
+  <!-- 店舗選択 -->
+  <div id="home" class="card">
+    <div class="muted small">店舗を選ぶとスキャン画面に移動します。</div>
+    <div id="storeGrid" style="margin-top:10px"></div>
   </div>
 
-  <div class="card">
-    <p class="muted">
-      ※ カメラ or バーコードスキャナ（Enterで確定）<br>
-      入力欄にフォーカスしたまま運用してください
-    </p>
-
-    <button id="btnCamera">📷 カメラでスキャン</button>
-    <button id="btnStopCamera" class="secondary">⏹ カメラ停止</button>
-
-    <div id="cameraWrap" style="display:none">
-      <div id="qrReader"></div>
+  <!-- スキャナ -->
+  <div id="scanner" style="display:none">
+    <div class="card">
+      <button id="btnHome" class="secondary">店舗一覧</button>
+      <button id="btnClear" class="secondary">今回をクリア</button>
+      <button id="btnShowRemain" class="secondary">未スキャン一覧</button>
     </div>
 
-    <div class="progressWrap">
-      <div class="muted small" id="progressText">progress: -</div>
-      <div class="progressBar"><div class="progressFill" id="progressFill"></div></div>
+    <div class="card">
+      <p class="muted">
+        ※ バーコードスキャナ運用推奨（Enterで確定）<br>
+        カメラは必要なときだけ全画面で起動します
+      </p>
+
+      <button id="btnCamera">📷 カメラでスキャン（全画面）</button>
+
+      <div class="progressWrap">
+        <div class="muted small" id="progressText">progress: -</div>
+        <div class="progressBar"><div class="progressFill" id="progressFill"></div></div>
+      </div>
+
+      <input id="scanInput" placeholder="ここにフォーカス → スキャン…" autocomplete="off" />
+      <div id="msg" class="muted"></div>
     </div>
 
-    <input id="scanInput" placeholder="ここにフォーカス → スキャン…" autocomplete="off" />
-    <div id="msg" class="muted"></div>
-  </div>
+    <div class="card">
+      <strong>現在の一致</strong>
+      <div id="current" style="margin-top:10px"></div>
+    </div>
 
-  <div class="card">
-    <strong>現在の一致</strong>
-    <div id="current" style="margin-top:10px"></div>
-  </div>
+    <div class="card">
+      <strong>スキャン履歴（今回）</strong>
+      <div id="history" style="margin-top:10px"></div>
+    </div>
 
-  <div class="card">
-    <strong>スキャン履歴（今回）</strong>
-    <div id="history" style="margin-top:10px"></div>
+    <div class="card" id="remainCard" style="display:none">
+      <strong>未スキャン一覧（この店舗）</strong>
+      <div class="muted small" style="margin-top:6px">残りを「管理No ／ マシン名」で表示（長い場合は一部省略）。</div>
+      <div id="remainList" style="margin-top:10px;white-space:pre-wrap"></div>
+    </div>
   </div>
-
-  <div class="card" id="remainCard" style="display:none">
-    <strong>未スキャン一覧（この店舗）</strong>
-    <div class="muted small" style="margin-top:6px">残りを「管理No ／ マシン名」で表示（長い場合は一部省略）。</div>
-    <div id="remainList" style="margin-top:10px;white-space:pre-wrap"></div>
-  </div>
-
-</div>
 </main>
 
 <!-- 棚卸完了 -->
@@ -175,6 +163,21 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
     <div id="doneTitle">棚卸完了！🎉</div>
     <div id="doneSub">全件スキャン済みです</div>
     <button id="btnDoneClose" class="secondary">閉じる</button>
+  </div>
+</div>
+
+<!-- カメラ全画面モーダル -->
+<div id="camModal">
+  <div id="camTop">
+    <div id="camHint">シール（5×3.5cm）を枠に入れるだけでOK</div>
+    <button id="camClose" class="secondary">⏹ 閉じる</button>
+  </div>
+  <div id="qrReader"></div>
+  <div id="camFrame">
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner br"></div>
+    <div class="corner bl"></div>
   </div>
 </div>
 
@@ -191,34 +194,26 @@ let STORE = (qs.get("store") || "").trim();
 const st = {
   all: [],
   rows: [],
-  byCode: new Map(),      // normalized-code -> row
-  scanned: [],            // {code, row, ok, ts, hitKey}
-  okSet: new Set(),       // normalized(code) の集合（重複カウント防止）
-  ngCount: 0              // 不一致カウント
+  byCode: new Map(),
+  scanned: [],
+  okSet: new Set(),
+  ngCount: 0
 };
 
-/* ========= 正規化（ゆるめ判定用） ========= */
+/* ========= 正規化 ========= */
 const normalize = (s) => String(s ?? "")
   .trim()
   .replace(/\r?\n/g, "")
   .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
-  .replace(/[ー−―‐\- ]/g, "")      // ハイフン/スペース除去
+  .replace(/[ー−―‐\- ]/g, "")
   .toUpperCase();
 
-/**
- * スキャナ/カメラの揺れを吸収する候補生成
- * - 生文字
- * - 先頭0除去
- * - 数字のみ
- * - 数字のみ + 先頭0除去
- */
 function codeVariants(raw){
   const c = normalize(raw);
   if(!c) return [];
   const out = new Set();
   out.add(c);
   out.add(c.replace(/^0+/, ""));
-
   const digits = c.replace(/\D/g, "");
   if(digits){
     out.add(digits);
@@ -234,9 +229,7 @@ function parseCSV(t){
   const header = lines.shift().split(",").map(x=>x.trim());
   const idx = {};
   header.forEach((h,i)=>idx[h]=i);
-
   const pick = (cols, key) => (idx[key] == null) ? "" : (cols[idx[key]] ?? "");
-
   return lines.map(line=>{
     const cols = line.split(",").map(x => x.replace(/^"|"$/g,"").replace(/""/g,'"'));
     return {
@@ -259,17 +252,8 @@ function pct(n){
   if(!isFinite(n)) return "0.0";
   return (Math.round(n*10)/10).toFixed(1);
 }
-
-function vibrateOk(){
-  try{
-    if(navigator.vibrate) navigator.vibrate([60, 30, 60]); // 成功：短短
-  }catch(_e){}
-}
-function vibrateDone(){
-  try{
-    if(navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 220]); // 完了：強め
-  }catch(_e){}
-}
+function vibrateOk(){ try{ if(navigator.vibrate) navigator.vibrate([60,30,60]); }catch(_e){} }
+function vibrateDone(){ try{ if(navigator.vibrate) navigator.vibrate([120,60,120,60,220]); }catch(_e){} }
 
 function showDoneIfComplete(){
   if(!STORE) return;
@@ -280,9 +264,7 @@ function showDoneIfComplete(){
     vibrateDone();
   }
 }
-function hideDone(){
-  el("doneOverlay").style.display = "none";
-}
+function hideDone(){ el("doneOverlay").style.display = "none"; }
 
 function updateBadges(){
   el("storeBadge").textContent="store: "+(STORE||"HOME");
@@ -375,7 +357,6 @@ function renderPanels(){
     el("current").innerHTML = `<div class="ng">❌ ${escapeHtml(last.code)}</div>`;
   }
 
-  // 履歴：スキャン済み（= okSet に入ってる）はグレーアウト
   el("history").innerHTML = st.scanned.slice(0, 80).map(x=>{
     if(!x.ok){
       return `<div class="ng">❌ ${escapeHtml(x.code)}</div>`;
@@ -395,24 +376,18 @@ function renderPanels(){
   }).join("");
 }
 
-/* ========= 未スキャン一覧（管理No + マシン名） ========= */
 function renderRemainList(){
   if(!STORE) return;
-
   const remainRows = st.rows.filter(r => !st.okSet.has(normalize(r.code)));
-
-  // 長すぎる場合は先頭200件まで
   const shown = remainRows.slice(0, 200);
-
   el("remainList").textContent =
     shown.map(r => `${r.code} ／ ${r.machine_name || "-"}`).join("\n")
     + (remainRows.length > shown.length ? `\n...（残り ${remainRows.length - shown.length} 件省略）` : "");
-
   el("remainCard").style.display = "";
   el("remainCard").scrollIntoView({ behavior:"smooth", block:"start" });
 }
 
-/* ========= スキャン（ゆる判定 + バイブ + グレーアウト + 完了） ========= */
+/* ========= スキャン ========= */
 function addScan(v){
   const variants = codeVariants(v);
   if(!variants.length) return;
@@ -424,7 +399,7 @@ function addScan(v){
     const row = st.byCode.get(c);
     if(row){
       hitRow = row;
-      hitKey = normalize(row.code); // 元のコードを基準キーにする
+      hitKey = normalize(row.code);
       break;
     }
   }
@@ -434,8 +409,6 @@ function addScan(v){
   if(ok){
     const before = st.okSet.size;
     st.okSet.add(hitKey);
-
-    // 初回ヒットだけしっかりバイブ
     if(st.okSet.size > before){
       vibrateOk();
     }else{
@@ -445,49 +418,44 @@ function addScan(v){
     st.ngCount++;
   }
 
-  st.scanned.unshift({
-    code: variants[0],
-    row: hitRow,
-    ok,
-    ts: Date.now(),
-    hitKey
-  });
+  st.scanned.unshift({ code: variants[0], row: hitRow, ok, ts: Date.now(), hitKey });
 
-  el("msg").textContent = ok ? "一致しました（スキャン済みはグレー表示）" : "一致なし（リストにありません）";
+  el("msg").textContent = ok ? "一致しました（済はグレー表示）" : "一致なし（リストにありません）";
   renderPanels();
   showDoneIfComplete();
   el("scanInput").focus();
 }
 
-/* ========= カメラ（シール比率 5cm:3.5cm ≒ 1.43 に寄せる） ========= */
+/* ========= カメラ（全画面モーダル） ========= */
 let qr=null, camRunning=false;
 
 function makeQrbox(){
-  // 画面サイズに合わせて自動調整
+  // シール比率 1.43 に近い 1.5 を採用（少し余裕）
   const vw = Math.min(window.innerWidth, 700);
-  const w = Math.round(vw * 0.86);          // 画面の86%
-  const ratio = 1.5;                        // シール(1.43)に近い 1.5 を採用（少し余裕）
-  const h = Math.round(w / ratio);
-
-  // 上限/下限（読み取り安定のため）
+  const w = Math.round(vw * 0.82);
+  const h = Math.round(w / 1.5);
   const ww = Math.max(260, Math.min(w, 520));
   const hh = Math.max(180, Math.min(h, 360));
   return { width: ww, height: hh };
 }
 
+function openCamModal(){
+  el("camModal").style.display="block";
+}
+function closeCamModal(){
+  el("camModal").style.display="none";
+}
+
 async function startCamera(){
-  if(!STORE){
-    alert("先に店舗を選択してください");
-    return;
-  }
+  if(!STORE){ alert("先に店舗を選択してください"); return; }
   if(camRunning) return;
 
-  el("cameraWrap").style.display="";
+  openCamModal();
   if(!qr) qr=new Html5Qrcode("qrReader");
 
   const config={
-    fps: 10,                 // 安定優先
-    qrbox: makeQrbox(),       // ✅ シール比率に寄せた枠
+    fps: 10,
+    qrbox: makeQrbox(),
     disableFlip:true,
     formatsToSupport:[
       Html5QrcodeSupportedFormats.EAN_13,
@@ -513,17 +481,17 @@ async function startCamera(){
       await qr.start({deviceId:{exact:camId}},config,onOk,onErr);
     }catch(e2){
       camRunning=false;
-      el("cameraWrap").style.display="none";
+      closeCamModal();
       alert("カメラ起動に失敗しました（権限/HTTPS/再読み込みを確認）");
     }
   }
 }
 
 async function stopCamera(){
-  el("cameraWrap").style.display="none";
-  if(!qr||!camRunning) return;
+  if(!qr||!camRunning){ closeCamModal(); return; }
   try{ await qr.stop(); }catch(_){}
   camRunning=false;
+  closeCamModal();
 }
 
 /* ========= 起動 ========= */
@@ -532,6 +500,13 @@ async function stopCamera(){
   el("btnDoneClose").onclick = hideDone;
   el("doneOverlay").addEventListener("click", (e) => {
     if(e.target === el("doneOverlay")) hideDone();
+  });
+
+  // カメラ閉じる
+  el("camClose").onclick = ()=>stopCamera();
+  el("camModal").addEventListener("click", (e)=>{
+    // 背景タップで閉じる（上部やreaderタップは除外したいのでModal直下のみ）
+    if(e.target === el("camModal")) stopCamera();
   });
 
   // UI
@@ -549,7 +524,6 @@ async function stopCamera(){
   el("btnShowRemain").onclick=()=>renderRemainList();
 
   el("btnCamera").onclick=()=>startCamera();
-  el("btnStopCamera").onclick=()=>stopCamera();
 
   el("scanInput").addEventListener("keydown",e=>{
     if(e.key==="Enter"){
@@ -569,18 +543,11 @@ async function stopCamera(){
   const csv=await fetch(DATA_CSV_URL,{cache:"no-store"}).then(r=>r.text());
   st.all=parseCSV(csv);
 
-  // 初期store
-  const init=(new URLSearchParams(location.search)).get("store")||"";
-  STORE=init.trim();
-
-  if(!STORE){
-    renderHome();
-    return;
-  }
+  STORE=((new URLSearchParams(location.search)).get("store")||"").trim();
+  if(!STORE){ renderHome(); return; }
 
   st.rows=st.all.filter(r=>String(r.store_key).trim()===STORE);
 
-  // 照合Mapを「複数キー」で強化（ゆる判定）
   st.byCode.clear();
   for(const r of st.rows){
     const base = normalize(r.code);
