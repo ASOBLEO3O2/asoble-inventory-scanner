@@ -2,9 +2,11 @@
 const DATA_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
-
 const qs = new URLSearchParams(location.search);
-const STORE = (qs.get("store") || "").trim(); // 空なら全店舗
+
+// URLSearchParams は基本デコードされますが、念のため二重エンコード系も吸収
+const STORE = safeDecode_(qs.get("store") || "").trim(); // 空なら全店舗
+
 const el = (id) => document.getElementById(id);
 
 const st = {
@@ -13,26 +15,87 @@ const st = {
   scanned: [],       // {ts, code, ok, row?}
 };
 
+/**
+ * 最低限のCSVパーサ（RFC4180寄り）
+ * - ダブルクォート、カンマ、改行を考慮
+ * - Googleのoutput=csv で十分に動くレベル
+ */
 function parseCSV(text) {
-  // シンプルCSV（今回のDATAはカンマや改行が入らない想定）
-  // もし景品名などでカンマが入り得る運用になったら、CSVパーサに差し替えます。
-  const lines = text.replace(/\r/g, "").split("\n").filter(Boolean);
-  const header = lines.shift().split(",");
-  const idx = {};
-  header.forEach((h, i) => idx[h] = i);
+  const rows = [];
+  let row = [];
+  let cur = "";
+  let inQ = false;
 
-  return lines.map(line => {
-    const cols = line.split(",").map(s => s.replace(/^"|"$/g, "").replace(/""/g, '"'));
-    return {
-      store_key: cols[idx.store_key] ?? "",
-      store_name: cols[idx.store_name] ?? "",
-      code: cols[idx.code] ?? "",
-      machine_name: cols[idx.machine_name] ?? "",
-      actual_stock: cols[idx.actual_stock] ?? "",
-      source_file: cols[idx.source_file] ?? "",
-      updated_at: cols[idx.updated_at] ?? "",
-    };
-  });
+  const s = text.replace(/\r/g, "");
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    if (inQ) {
+      if (ch === '"') {
+        // "" はエスケープされた "
+        if (s[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQ = false;
+        }
+      } else {
+        cur += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inQ = true;
+    } else if (ch === ",") {
+      row.push(cur);
+      cur = "";
+    } else if (ch === "\n") {
+      row.push(cur);
+      cur = "";
+      // 空行はスキップ
+      if (row.some(v => v !== "")) rows.push(row);
+      row = [];
+    } else {
+      cur += ch;
+    }
+  }
+
+  // 最終行
+  row.push(cur);
+  if (row.some(v => v !== "")) rows.push(row);
+
+  if (!rows.length) return [];
+
+  const header = rows.shift();
+  const idx = {};
+  header.forEach((h, i) => idx[String(h || "").trim()] = i);
+
+  const pick = (cols, key) => {
+    const j = idx[key];
+    return (j == null) ? "" : (cols[j] ?? "");
+  };
+
+  return rows.map(cols => ({
+    store_key: pick(cols, "store_key"),
+    store_name: pick(cols, "store_name"),
+    code: pick(cols, "code"),
+    machine_name: pick(cols, "machine_name"),
+    actual_stock: pick(cols, "actual_stock"),
+    source_file: pick(cols, "source_file"),
+    updated_at: pick(cols, "updated_at"),
+  }));
+}
+
+function safeDecode_(s) {
+  try {
+    // すでにデコード済みの場合はそのまま
+    // 変な%が混じると例外になるのでtryで吸収
+    return decodeURIComponent(String(s));
+  } catch {
+    return String(s);
+  }
 }
 
 function fmt(ts) {
@@ -44,13 +107,11 @@ function render() {
   el("storeBadge").textContent = "store: " + (STORE || "ALL");
   el("countBadge").textContent = "rows: " + st.rows.length;
 
-  // updated はDATAの先頭から取る（全部同じtsで入れてる想定）
   const u = st.rows[0]?.updated_at || "-";
   el("updatedBadge").textContent = "updated: " + (u ? String(u).slice(0, 19) : "-");
 
   el("historyBadge").textContent = String(st.scanned.length);
 
-  // current
   const last = st.scanned[0];
   if (!last) {
     el("current").textContent = "";
@@ -59,21 +120,30 @@ function render() {
     const r = last.row;
     el("hitBadge").textContent = "HIT";
     el("current").innerHTML =
-      `<div class="ok">✅ ${last.code}</div>` +
-      `<div>店舗: ${r.store_name} (${r.store_key})</div>` +
-      `<div>マシン: ${r.machine_name}</div>` +
-      `<div>実在庫: ${r.actual_stock}</div>`;
+      `<div class="ok">✅ ${escapeHtml_(last.code)}</div>` +
+      `<div>店舗: ${escapeHtml_(r.store_name)} (${escapeHtml_(r.store_key)})</div>` +
+      `<div>マシン: ${escapeHtml_(r.machine_name)}</div>` +
+      `<div>実在庫: ${escapeHtml_(r.actual_stock)}</div>`;
   } else {
     el("hitBadge").textContent = "NO HIT";
-    el("current").innerHTML = `<div class="ng">❌ ${last.code}</div>`;
+    el("current").innerHTML = `<div class="ng">❌ ${escapeHtml_(last.code)}</div>`;
   }
 
-  // history
   el("history").innerHTML = st.scanned.map(x => {
     const head = x.ok ? `<span class="ok">✅</span>` : `<span class="ng">❌</span>`;
-    const tail = x.ok ? ` ${x.row.machine_name}` : "";
-    return `${head} ${x.code}  <span class="muted">${fmt(x.ts)}</span>${tail}`;
+    const tail = x.ok ? ` ${escapeHtml_(x.row.machine_name)}` : "";
+    return `${head} ${escapeHtml_(x.code)}  <span class="muted">${fmt(x.ts)}</span>${tail}`;
   }).join("\n");
+}
+
+// 画面表示のXSS予防（念のため）
+function escapeHtml_(s) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function addScan(code) {
@@ -104,7 +174,7 @@ async function boot() {
 
   st.byCode.clear();
   for (const r of filtered) {
-    if (r.code) st.byCode.set(r.code, r);
+    if (r.code) st.byCode.set(String(r.code).trim(), r);
   }
 
   el("msg").textContent = "読込完了。入力欄にフォーカスしてスキャンしてください。";
@@ -112,6 +182,7 @@ async function boot() {
 
   const input = el("scanInput");
   input.focus();
+
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -131,4 +202,3 @@ async function boot() {
 boot().catch(err => {
   el("msg").textContent = "エラー: " + err.message;
 });
-
