@@ -1,148 +1,292 @@
-body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont;background:#0b1220;color:#e5e7eb}
-header{padding:14px;font-size:20px;font-weight:700}
+/* ===== Base ===== */
+:root{
+  --bg:#0b1220;
+  --card:#111827;
+  --card2:#020617;
+  --line:#334155;
+  --text:#e5e7eb;
+  --muted:#94a3b8;
+  --ok:#22c55e;
+  --ng:#ef4444;
+  --warn:#fbbf24;
+}
 
-.badges{display:flex;flex-wrap:wrap;gap:8px;padding:0 14px 8px}
-.badge{background:#1e293b;padding:6px 10px;border-radius:999px;font-size:13px}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+header{padding:14px;font-size:20px;font-weight:800}
 
 main{padding:14px}
-.card{background:#111827;border-radius:14px;padding:14px;margin-bottom:14px}
+.card{
+  background:var(--card);
+  border-radius:14px;
+  padding:14px;
+  margin-bottom:14px;
+}
 
-button{background:#1e40af;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-size:15px}
+.badges{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  padding:0 14px 8px;
+}
+.badge{
+  background:#1e293b;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:13px;
+}
+
+button{
+  background:#1e40af;
+  color:#fff;
+  border:none;
+  border-radius:10px;
+  padding:10px 14px;
+  font-size:15px;
+  cursor:pointer;
+}
 button.secondary{background:#334155}
+button:active{transform:translateY(1px)}
 
-input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid #334155;background:#020617;color:#fff}
+input{
+  width:100%;
+  padding:14px;
+  font-size:16px;
+  border-radius:12px;
+  border:1px solid var(--line);
+  background:var(--card2);
+  color:#fff;
+}
+
 .small{font-size:13px}
-.muted{color:#94a3b8;white-space:pre-line}
-
-.ok{color:#22c55e}
-.ng{color:#ef4444}
+.muted{color:var(--muted);white-space:pre-line}
+.ok{color:var(--ok)}
+.ng{color:var(--ng)}
+.warn{color:var(--warn)}
 
 .storeGrid{margin-top:10px}
 .storeCard{
-  display:block;background:#020617;border-radius:12px;padding:14px;
-  margin-bottom:10px;text-decoration:none;color:#fff
+  display:block;
+  background:var(--card2);
+  border-radius:12px;
+  padding:14px;
+  margin-bottom:10px;
+  text-decoration:none;
+  color:#fff;
+  border:1px solid #0f172a;
 }
 
-.stack{margin-top:10px;display:flex;flex-direction:column;gap:10px}
-
-/* 進捗バー */
+/* ===== progress ===== */
 .progressWrap{margin-top:10px}
-.progressBar{width:100%;height:12px;background:#0b1020;border:1px solid #334155;border-radius:999px;overflow:hidden}
-.progressFill{height:100%;width:0%;background:#22c55e}
+.progressBar{
+  width:100%;
+  height:12px;
+  background:#0b1020;
+  border:1px solid var(--line);
+  border-radius:999px;
+  overflow:hidden;
+}
+.progressFill{height:100%;width:0%;background:var(--ok)}
+.stack{margin-top:10px;display:grid;gap:10px}
 
-/* 完了オーバーレイ */
-#doneOverlay{position:fixed;inset:0;display:none;background:rgba(0,0,0,.55);align-items:center;justify-content:center;z-index:9999}
-#doneCard{width:min(560px, calc(100vw - 28px));background:#111827;border:1px solid #334155;border-radius:18px;padding:18px;text-align:center}
-#doneTitle{font-size:22px;font-weight:800;margin-bottom:6px}
-#doneSub{color:#94a3b8;margin-bottom:14px}
-
-/* スキャン済みグレーアウト */
-.hitRow{padding:8px 10px;border-radius:12px;border:1px solid #334155;background:#0b1220}
-.hitRow.okRow{border-color:#1f6f3a;background:#07140d}
-.hitRow.done{opacity:.45;filter:grayscale(1)}
+/* ===== hit row ===== */
+.hitRow{
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid var(--line);
+  background:#0b1220;
+}
+.hitRow.okRow{
+  border-color:#1f6f3a;
+  background:#07140d;
+}
+.hitRow.done{
+  opacity:.45;
+  filter:grayscale(1);
+}
 .hitRow .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
-.hitRow .code{font-weight:800}
-.hitRow .machine{color:#cbd5e1}
-.hitRow .tag{font-size:12px;padding:2px 8px;border-radius:999px;background:#0f172a;border:1px solid #334155;color:#cbd5e1}
+.hitRow .code{font-weight:900}
+.hitRow .machine{color:#cbd5e1;margin-top:6px}
+.hitRow .tag{
+  font-size:12px;
+  padding:2px 8px;
+  border-radius:999px;
+  background:#0f172a;
+  border:1px solid var(--line);
+  color:#cbd5e1;
+}
 
-/* ✅ 未取得リスト：グリッド */
+/* ===== remain grid ===== */
 .remainGrid{
   margin-top:10px;
   display:grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns:repeat(2, minmax(0, 1fr));
   gap:10px;
 }
 .remainItem{
   background:#0b1220;
-  border:1px solid #334155;
+  border:1px solid var(--line);
   border-radius:12px;
-  padding:10px;
+  padding:10px 10px;
 }
 .remainItem .c{font-weight:900}
-.remainItem .m{color:#cbd5e1;font-size:13px;margin-top:4px}
+.remainItem .m{color:#cbd5e1;margin-top:4px;font-size:13px}
 
-/* ===== カメラ全画面モーダル ===== */
-#camModal{
+/* ===== done overlay ===== */
+#doneOverlay{
   position:fixed; inset:0;
+  display:none;
+  background:rgba(0,0,0,.55);
+  align-items:center; justify-content:center;
+  z-index:9999;
+}
+#doneCard{
+  width:min(560px, calc(100vw - 28px));
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:18px;
+  text-align:center;
+}
+#doneTitle{font-size:22px;font-weight:900;margin-bottom:6px}
+#doneSub{color:var(--muted);margin-bottom:14px}
+
+/* ===== camera modal ===== */
+#camModal{
+  position:fixed;
+  inset:0;
   display:none;
   background:#000;
   z-index:9998;
 }
 #camTop{
-  position:absolute; top:0; left:0; right:0;
-  display:flex; gap:10px; align-items:flex-start; justify-content:space-between;
-  padding:10px 10px 14px;
-  background:linear-gradient(to bottom, rgba(0,0,0,.78), rgba(0,0,0,0));
-  z-index:2;
+  position:absolute;
+  top:0; left:0; right:0;
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  justify-content:space-between;
+  padding:10px 10px 6px;
+  z-index:3;
+  background:linear-gradient(to bottom, rgba(0,0,0,.75), rgba(0,0,0,0));
 }
-.camTopLeft{display:flex;flex-direction:column;gap:4px}
+
+.camTopLeft{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  max-width:56vw;
+}
 #camHint{font-size:13px;color:#e5e7eb;opacity:.95}
 .camSubHint{font-size:12px;color:#cbd5e1;opacity:.85}
-.camTopRight{display:flex;gap:10px;align-items:center}
+
+.camTopRight{
+  display:flex;
+  gap:10px;
+  align-items:center;
+}
 
 .zoomBox{
-  display:flex;gap:8px;align-items:center;
-  background:rgba(15,23,42,.65);
-  border:1px solid rgba(148,163,184,.35);
-  padding:8px 10px;border-radius:12px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:10px 12px;
+  border-radius:14px;
+  background:rgba(15,23,42,.78);
+  border:1px solid rgba(51,65,85,.9);
+  backdrop-filter: blur(8px);
 }
-.zoomLabel{font-size:12px;color:#cbd5e1}
-#zoomRange{width:120px}
-.zoomVal{font-size:12px;color:#e5e7eb;min-width:42px;text-align:right}
+.zoomLabel{font-size:12px;color:#cbd5e1;opacity:.95}
+#zoomRange{width:160px}
+.zoomVal{font-size:12px;color:#e5e7eb;min-width:44px;text-align:right}
 
-#qrReader{position:absolute; inset:0}
+#camClose{background:#334155}
 
-/* ✅ 緑枠（html5-qrcodeが描くscan region）を消す：ガイドは白枠だけ */
-#qrReader__scan_region{border:none !important;}
-#qrReader__scan_region video{outline:none !important;}
+/* camera area */
+#qrReader{
+  position:absolute;
+  inset:0;
+  z-index:1;
+}
 
-/* ガイド文（赤線は目安） */
+/* guide text + red line (faint) */
 #qrReader::before{
   content:"シール全体を枠の中へ（赤線は目安）";
-  position:absolute; top:74px; left:0; right:0;
-  text-align:center; font-size:13px; color:#ff9aa2;
-  z-index:3; pointer-events:none;
+  position:absolute;
+  top:80px; left:0; right:0;
+  text-align:center;
+  font-size:13px;
+  color:#ff9aa2;
+  z-index:4;
+  pointer-events:none;
 }
-/* 赤線（薄く） */
 #qrReader::after{
-  content:""; position:absolute; top:50%; left:10%;
-  width:80%; height:2px; background:#ff3b30; opacity:.18;
-  z-index:3; pointer-events:none;
+  content:"";
+  position:absolute;
+  top:50%;
+  left:10%;
+  width:80%;
+  height:2px;
+  background:#ff3b30;
+  opacity:.25;
+  z-index:4;
+  pointer-events:none;
 }
 
-/* 四隅コーナー */
+/* frame corners */
 #camFrame{
   position:absolute;
   left:14px; right:14px;
   top:120px; bottom:14px;
-  z-index:3;
+  z-index:4;
   pointer-events:none;
 }
 .corner{
-  position:absolute;width:34px;height:34px;border:3px solid rgba(34,197,94,.85);
-  border-right:none;border-bottom:none;border-radius:10px;
+  position:absolute;
+  width:34px;
+  height:34px;
+  border:3px solid rgba(34,197,94,.9);
+  border-right:none;
+  border-bottom:none;
+  border-radius:10px;
 }
 .corner.tl{left:0;top:0}
 .corner.tr{right:0;top:0;transform:rotate(90deg)}
 .corner.br{right:0;bottom:0;transform:rotate(180deg)}
 .corner.bl{left:0;bottom:0;transform:rotate(270deg)}
 
-/* ✅ 成功トースト */
+/* toast */
 .toast{
   position:absolute;
-  left:50%; bottom:26px;
+  left:50%;
+  bottom:22px;
   transform:translateX(-50%);
-  background:rgba(17,24,39,.85);
-  border:1px solid rgba(148,163,184,.35);
-  color:#e5e7eb;
-  padding:10px 12px;
-  border-radius:12px;
-  font-size:14px;
-  z-index:4;
-  display:none;
-  max-width:min(92vw, 680px);
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
+  z-index:5;
+  padding:12px 14px;
+  border-radius:14px;
+  background:rgba(2,6,23,.86);
+  border:1px solid rgba(51,65,85,.9);
+  color:#fff;
+  font-weight:800;
+  max-width:min(92vw, 560px);
+  text-align:center;
+  opacity:0;
+  transition:opacity .15s ease, transform .15s ease;
+  pointer-events:none;
 }
-.toast.show{display:block}
+.toast.show{
+  opacity:1;
+  transform:translateX(-50%) translateY(-2px);
+}
+
+/* iOS safe-area */
+@supports (padding: env(safe-area-inset-top)){
+  #camTop{padding-top:calc(10px + env(safe-area-inset-top))}
+  .toast{bottom:calc(22px + env(safe-area-inset-bottom))}
+}
+
