@@ -18,13 +18,15 @@ button.secondary{background:#334155}
 main{padding:14px}
 .card{background:#111827;border-radius:14px;padding:14px;margin-bottom:14px}
 input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid #334155;background:#020617;color:#fff}
-#qrReader{width:100%;height:60vh;position:relative;margin-top:10px}
+#qrReader{width:100%;height:52vh;position:relative;margin-top:10px}
+.small{font-size:13px}
 
 /* 赤いスキャンライン */
 #qrReader::after{
   content:"";position:absolute;top:50%;left:8%;width:84%;height:2px;
   background:#ff3b30;pointer-events:none;opacity:.95
 }
+/* 説明 */
 #qrReader::before{
   content:"赤い線にバーコードを合わせてください";
   position:absolute;top:10px;width:100%;
@@ -33,11 +35,47 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
 
 .ok{color:#22c55e}
 .ng{color:#ef4444}
+.warn{color:#fbbf24}
 .muted{color:#94a3b8;white-space:pre-line}
 .storeCard{
   display:block;background:#020617;border-radius:12px;padding:14px;
   margin-bottom:10px;text-decoration:none;color:#fff
 }
+
+/* 進捗バー */
+.progressWrap{margin-top:10px}
+.progressBar{
+  width:100%;
+  height:12px;
+  background:#0b1020;
+  border:1px solid #334155;
+  border-radius:999px;
+  overflow:hidden;
+}
+.progressFill{
+  height:100%;
+  width:0%;
+  background:#22c55e;
+}
+
+/* 完了オーバーレイ */
+#doneOverlay{
+  position:fixed;inset:0;
+  display:none;
+  background:rgba(0,0,0,.55);
+  align-items:center;justify-content:center;
+  z-index:9999;
+}
+#doneCard{
+  width:min(560px, calc(100vw - 28px));
+  background:#111827;
+  border:1px solid #334155;
+  border-radius:18px;
+  padding:18px;
+  text-align:center;
+}
+#doneTitle{font-size:22px;font-weight:800;margin-bottom:6px}
+#doneSub{color:#94a3b8;margin-bottom:14px}
 </style>
 </head>
 
@@ -48,6 +86,8 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
   <div class="badge" id="storeBadge">store: HOME</div>
   <div class="badge" id="countBadge">rows: -</div>
   <div class="badge" id="progressBadge">progress: -</div>
+  <div class="badge" id="remainBadge">remain: -</div>
+  <div class="badge" id="ngBadge">ng: 0</div>
   <div class="badge" id="updatedBadge">updated: -</div>
 </div>
 
@@ -55,7 +95,8 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
 
 <!-- 店舗選択 -->
 <div id="home" class="card">
-  <div id="storeGrid"></div>
+  <div class="muted small">店舗を選ぶとスキャン画面に移動します。</div>
+  <div id="storeGrid" style="margin-top:10px"></div>
 </div>
 
 <!-- スキャナ -->
@@ -64,6 +105,7 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
   <div class="card">
     <button id="btnHome" class="secondary">店舗一覧</button>
     <button id="btnClear" class="secondary">今回をクリア</button>
+    <button id="btnShowRemain" class="secondary">未スキャン一覧</button>
   </div>
 
   <div class="card">
@@ -77,6 +119,11 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
 
     <div id="cameraWrap" style="display:none">
       <div id="qrReader"></div>
+    </div>
+
+    <div class="progressWrap">
+      <div class="muted small" id="progressText">progress: -</div>
+      <div class="progressBar"><div class="progressFill" id="progressFill"></div></div>
     </div>
 
     <input id="scanInput" placeholder="ここにフォーカス → スキャン…" autocomplete="off" />
@@ -93,8 +140,23 @@ input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid
     <div id="history" style="margin-top:10px"></div>
   </div>
 
+  <div class="card" id="remainCard" style="display:none">
+    <strong>未スキャン一覧（この店舗）</strong>
+    <div class="muted small" style="margin-top:6px">残りの管理Noを表示します（長い場合は一部省略）。</div>
+    <div id="remainList" style="margin-top:10px;white-space:pre-wrap"></div>
+  </div>
+
 </div>
 </main>
+
+<!-- 棚卸完了 -->
+<div id="doneOverlay">
+  <div id="doneCard">
+    <div id="doneTitle">棚卸完了！🎉</div>
+    <div id="doneSub">全件スキャン済みです</div>
+    <button id="btnDoneClose" class="secondary">閉じる</button>
+  </div>
+</div>
 
 <script>
 /* ========= 設定 ========= */
@@ -106,11 +168,44 @@ const el = (id) => document.getElementById(id);
 const qs = new URLSearchParams(location.search);
 let STORE = (qs.get("store") || "").trim();
 
-const st = { all: [], rows: [], byCode: new Map(), scanned: [] };
+const st = {
+  all: [],
+  rows: [],
+  byCode: new Map(),      // normalized-code -> row
+  scanned: [],            // {code, row, ok, ts}
+  okSet: new Set(),       // normalized-code (hit) の集合（重複カウント防止）
+  ngCount: 0              // 不一致カウント
+};
 
-const normalize = (s) => String(s || "").trim()
+/* ========= 正規化（ゆるめ判定用） ========= */
+const normalize = (s) => String(s ?? "")
+  .trim()
   .replace(/\r?\n/g, "")
-  .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  .replace(/[ー−―‐\- ]/g, "")      // ハイフン/スペース除去
+  .toUpperCase();
+
+/**
+ * スキャナ/カメラの揺れを吸収する候補生成
+ * - 生文字
+ * - 先頭0除去
+ * - 数字のみ
+ * - 数字のみ + 先頭0除去
+ */
+function codeVariants(raw){
+  const c = normalize(raw);
+  if(!c) return [];
+  const out = new Set();
+  out.add(c);
+  out.add(c.replace(/^0+/, ""));
+
+  const digits = c.replace(/\D/g, "");
+  if(digits){
+    out.add(digits);
+    out.add(digits.replace(/^0+/, ""));
+  }
+  return [...out].filter(Boolean);
+}
 
 /* ========= CSV ========= */
 function parseCSV(t){
@@ -140,59 +235,181 @@ function setMode(m){
   el("home").style.display = (m==="home")?"":"none";
   el("scanner").style.display = (m==="scan")?"":"none";
 }
+function pct(n){
+  if(!isFinite(n)) return "0.0";
+  return (Math.round(n*10)/10).toFixed(1);
+}
+
+function vibrateOk(){
+  // iOS Safari は未対応/制限がある場合あり（Androidはほぼ動く）
+  try{
+    if(navigator.vibrate) navigator.vibrate([60, 30, 60]); // 成功：短短
+  }catch(_e){}
+}
+
+function showDoneIfComplete(){
+  if(!STORE) return;
+  const total = st.rows.length;
+  const done = st.okSet.size;
+  if(total > 0 && done >= total){
+    el("doneOverlay").style.display = "flex";
+  }
+}
+
+function hideDone(){
+  el("doneOverlay").style.display = "none";
+}
+
 function updateBadges(){
   el("storeBadge").textContent="store: "+(STORE||"HOME");
   el("countBadge").textContent="rows: "+(STORE?st.rows.length:"-");
-  const done=new Set(st.scanned.filter(x=>x.ok).map(x=>x.code)).size;
-  el("progressBadge").textContent=STORE?`progress: ${done}/${st.rows.length}`:"progress: -";
-  el("updatedBadge").textContent="updated: "+String(st.rows[0]?.updated_at||st.all[0]?.updated_at||"-").slice(0,10);
-}
-function renderHome(){
-  setMode("home");
-  const map=new Map();
-  for(const r of st.all){ if(r.store_key&&!map.has(r.store_key)) map.set(r.store_key,r.store_name||r.store_key); }
-  el("storeGrid").innerHTML=[...map.entries()].map(([k,n])=>`
-    <a class="storeCard" href="?store=${encodeURIComponent(k)}">
-      <b>${n}</b><div class="muted">${k}</div>
-    </a>`).join("");
-  updateBadges();
-}
-function renderScan(){
-  setMode("scan");
-  el("msg").textContent="読込完了。入力欄にフォーカスしてスキャンしてください。";
-  updateBadges(); el("scanInput").focus();
-}
-function renderPanels(){
-  updateBadges();
-  const last=st.scanned[0];
-  el("current").innerHTML=!last?"":last.ok?
-    `<div class="ok">✅ ${last.code}</div><div>${last.row.machine_name}</div>`:
-    `<div class="ng">❌ ${last.code}</div>`;
-  el("history").innerHTML=st.scanned.map(x=>x.ok?
-    `<div class="ok">✅ ${x.code} <span class="muted">${x.row.machine_name}</span></div>`:
-    `<div class="ng">❌ ${x.code}</div>`).join("");
+
+  if(!STORE){
+    el("progressBadge").textContent="progress: -";
+    el("remainBadge").textContent="remain: -";
+    el("ngBadge").textContent="ng: 0";
+    el("updatedBadge").textContent="updated: "+String(st.all[0]?.updated_at||"-").slice(0,10);
+    el("progressText").textContent="progress: -";
+    el("progressFill").style.width="0%";
+    return;
+  }
+
+  const total = st.rows.length;
+  const done = st.okSet.size;
+  const remain = Math.max(0, total - done);
+  const p = total ? (done * 100 / total) : 0;
+
+  el("progressBadge").textContent = `progress: ${done}/${total} (${pct(p)}%)`;
+  el("remainBadge").textContent = `remain: ${remain}`;
+  el("ngBadge").textContent = `ng: ${st.ngCount}`;
+  el("updatedBadge").textContent = "updated: "+String(st.rows[0]?.updated_at||st.all[0]?.updated_at||"-").slice(0,10);
+
+  el("progressText").textContent = `progress: ${done}/${total} (${pct(p)}%)  remain:${remain}`;
+  el("progressFill").style.width = `${Math.min(100, Math.max(0,p))}%`;
 }
 
-/* ========= スキャン ========= */
+function renderHome(){
+  setMode("home");
+  el("title").textContent = "棚卸スキャナ（店舗選択）";
+
+  const map=new Map();
+  for(const r of st.all){
+    if(r.store_key && !map.has(r.store_key)) map.set(r.store_key, r.store_name || r.store_key);
+  }
+  el("storeGrid").innerHTML=[...map.entries()]
+    .sort((a,b)=>String(a[1]).localeCompare(String(b[1]),"ja"))
+    .map(([k,n])=>`
+      <a class="storeCard" href="?store=${encodeURIComponent(k)}">
+        <b>${n}</b><div class="muted small">${k}</div>
+      </a>`).join("");
+
+  updateBadges();
+}
+
+function renderScan(){
+  setMode("scan");
+  el("title").textContent = "棚卸スキャナ";
+  el("msg").textContent="読込完了。入力欄にフォーカスしてスキャンしてください。";
+  el("remainCard").style.display = "none";
+  updateBadges();
+  el("scanInput").focus();
+}
+
+function renderPanels(){
+  updateBadges();
+
+  const last=st.scanned[0];
+  if(!last){
+    el("current").innerHTML = "";
+  }else if(last.ok){
+    el("current").innerHTML =
+      `<div class="ok">✅ ${last.code}</div>` +
+      `<div>マシン: ${last.row.machine_name}</div>`;
+  }else{
+    el("current").innerHTML = `<div class="ng">❌ ${last.code}</div>`;
+  }
+
+  el("history").innerHTML = st.scanned.slice(0, 80).map(x=>{
+    return x.ok
+      ? `<div class="ok">✅ ${x.code} <span class="muted small"> ${x.row.machine_name}</span></div>`
+      : `<div class="ng">❌ ${x.code}</div>`;
+  }).join("");
+}
+
+/* ========= 未スキャン一覧 ========= */
+function renderRemainList(){
+  if(!STORE) return;
+  const totalCodes = st.rows.map(r => normalize(r.code)).filter(Boolean);
+  const remain = [];
+  for(const c of totalCodes){
+    if(!st.okSet.has(c)) remain.push(c);
+  }
+
+  // 長すぎる場合は先頭200件まで
+  const shown = remain.slice(0, 200);
+  el("remainList").textContent =
+    shown.join("\n") + (remain.length > shown.length ? `\n...（残り ${remain.length - shown.length} 件省略）` : "");
+
+  el("remainCard").style.display = "";
+  el("remainCard").scrollIntoView({ behavior:"smooth", block:"start" });
+}
+
+/* ========= スキャン（ゆる判定 + バイブ + 完了） ========= */
 function addScan(v){
-  const code=normalize(v); if(!code) return;
-  const row=st.byCode.get(code); const ok=!!row;
-  st.scanned.unshift({code,row,ok,ts:Date.now()});
-  el("msg").textContent=ok?"一致しました":"一致なし（リストにありません）";
-  renderPanels(); el("scanInput").focus();
+  const variants = codeVariants(v);
+  if(!variants.length) return;
+
+  let hitRow = null;
+  let hitKey = null;
+
+  for(const c of variants){
+    const row = st.byCode.get(c);
+    if(row){
+      hitRow = row;
+      hitKey = normalize(row.code); // 元のコードを基準キーにする
+      break;
+    }
+  }
+
+  const ok = !!hitRow;
+  if(ok){
+    // 同じものを二重にカウントしない
+    st.okSet.add(hitKey);
+    vibrateOk();
+  }else{
+    st.ngCount++;
+  }
+
+  st.scanned.unshift({
+    code: variants[0], // 表示は最初の候補（=整形後）
+    row: hitRow,
+    ok,
+    ts: Date.now()
+  });
+
+  el("msg").textContent = ok ? "一致しました" : "一致なし（リストにありません）";
+  renderPanels();
+  showDoneIfComplete();
+  el("scanInput").focus();
 }
 
 /* ========= カメラ（安定版） ========= */
 let qr=null, camRunning=false;
 
 async function startCamera(){
-  if(!STORE||camRunning) return;
+  if(!STORE){
+    alert("先に店舗を選択してください");
+    return;
+  }
+  if(camRunning) return;
+
   el("cameraWrap").style.display="";
   if(!qr) qr=new Html5Qrcode("qrReader");
 
   const config={
     fps:12,
-    qrbox:{width:360,height:120},
+    // ✅ 少し大きめの横長枠（接写しやすい）
+    qrbox:{width:420,height:140},
     disableFlip:true,
     formatsToSupport:[
       Html5QrcodeSupportedFormats.EAN_13,
@@ -208,12 +425,21 @@ async function startCamera(){
   const onErr=(_)=>{};
 
   camRunning=true;
+
   try{
+    // まずは背面指定
     await qr.start({facingMode:"environment"},config,onOk,onErr);
-  }catch(e){
-    const cams=await Html5Qrcode.getCameras();
-    const camId=cams[cams.length-1]?.id;
-    await qr.start({deviceId:{exact:camId}},config,onOk,onErr);
+  }catch(e1){
+    try{
+      // だめなら deviceId でフォールバック（最後のカメラ＝背面のことが多い）
+      const cams=await Html5Qrcode.getCameras();
+      const camId=cams[cams.length-1]?.id;
+      await qr.start({deviceId:{exact:camId}},config,onOk,onErr);
+    }catch(e2){
+      camRunning=false;
+      el("cameraWrap").style.display="none";
+      alert("カメラ起動に失敗しました（権限/HTTPS/再読み込みを確認）");
+    }
   }
 }
 
@@ -226,23 +452,73 @@ async function stopCamera(){
 
 /* ========= 起動 ========= */
 (async()=>{
-  el("btnHome").onclick=()=>location.href="./";
-  el("btnClear").onclick=()=>{st.scanned=[];renderPanels();};
-  el("btnCamera").onclick=()=>startCamera();
-  el("btnStopCamera").onclick=()=>stopCamera();
-  el("scanInput").addEventListener("keydown",e=>{
-    if(e.key==="Enter"){e.preventDefault();addScan(el("scanInput").value);el("scanInput").value="";}
+  // 完了オーバーレイ
+  el("btnDoneClose").onclick = hideDone;
+  el("doneOverlay").addEventListener("click", (e) => {
+    if(e.target === el("doneOverlay")) hideDone();
   });
 
+  // UI
+  el("btnHome").onclick=()=>location.href="./";
+  el("btnClear").onclick=()=>{
+    st.scanned=[];
+    st.okSet.clear();
+    st.ngCount=0;
+    el("remainCard").style.display="none";
+    el("msg").textContent="今回分をクリアしました";
+    renderPanels();
+    el("scanInput").focus();
+  };
+  el("btnShowRemain").onclick=()=>renderRemainList();
+
+  el("btnCamera").onclick=()=>startCamera();
+  el("btnStopCamera").onclick=()=>stopCamera();
+
+  el("scanInput").addEventListener("keydown",e=>{
+    if(e.key==="Enter"){
+      e.preventDefault();
+      addScan(el("scanInput").value);
+      el("scanInput").value="";
+    }
+  });
+
+  // iOSでフォーカスが外れやすい対策（軽め）
+  document.addEventListener("touchstart", () => {
+    const inp = el("scanInput");
+    if(document.activeElement !== inp) inp.focus();
+  }, { passive: true });
+
+  // DATA
   const csv=await fetch(DATA_CSV_URL,{cache:"no-store"}).then(r=>r.text());
   st.all=parseCSV(csv);
 
-  if(!STORE){ renderHome(); return; }
+  // 初期store
+  const init=(new URLSearchParams(location.search)).get("store")||"";
+  STORE=init.trim();
 
-  st.rows=st.all.filter(r=>r.store_key===STORE);
-  st.byCode.clear(); st.rows.forEach(r=>st.byCode.set(normalize(r.code),r));
-  renderScan(); renderPanels();
+  if(!STORE){
+    renderHome();
+    return;
+  }
+
+  st.rows=st.all.filter(r=>String(r.store_key).trim()===STORE);
+
+  // 照合Mapを「複数キー」で強化（ゆる判定）
+  st.byCode.clear();
+  for(const r of st.rows){
+    const base = normalize(r.code);
+    if(base) st.byCode.set(base, r);
+    const v = codeVariants(r.code);
+    for(const k of v){
+      if(k) st.byCode.set(k, r); // 別名キーでも同じ行に紐づけ
+    }
+  }
+
+  renderScan();
+  renderPanels();
 })();
 </script>
+
 </body>
 </html>
+
