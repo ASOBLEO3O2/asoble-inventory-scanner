@@ -9,116 +9,40 @@
 <script src="https://unpkg.com/html5-qrcode"></script>
 
 <style>
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont;
-  background: #0b1220;
-  color: #e5e7eb;
-}
-
-header {
-  padding: 14px;
-  font-size: 20px;
-  font-weight: bold;
-}
-
-.badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 14px 8px;
-}
-
-.badge {
-  background: #1e293b;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 13px;
-}
-
-button {
-  background: #1e40af;
-  color: #fff;
-  border: none;
-  border-radius: 10px;
-  padding: 10px 14px;
-  font-size: 15px;
-}
-
-button.secondary {
-  background: #334155;
-}
-
-main {
-  padding: 14px;
-}
-
-.card {
-  background: #111827;
-  border-radius: 14px;
-  padding: 14px;
-  margin-bottom: 14px;
-}
-
-input {
-  width: 100%;
-  padding: 14px;
-  font-size: 16px;
-  border-radius: 12px;
-  border: 1px solid #334155;
-  background: #020617;
-  color: #fff;
-}
-
-#qrReader {
-  width: 100%;
-  height: 60vh;
-  position: relative;
-  margin-top: 10px;
-}
+body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont;background:#0b1220;color:#e5e7eb}
+header{padding:14px;font-size:20px;font-weight:700}
+.badges{display:flex;flex-wrap:wrap;gap:8px;padding:0 14px 8px}
+.badge{background:#1e293b;padding:6px 10px;border-radius:999px;font-size:13px}
+button{background:#1e40af;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-size:15px}
+button.secondary{background:#334155}
+main{padding:14px}
+.card{background:#111827;border-radius:14px;padding:14px;margin-bottom:14px}
+input{width:100%;padding:14px;font-size:16px;border-radius:12px;border:1px solid #334155;background:#020617;color:#fff}
+#qrReader{width:100%;height:60vh;position:relative;margin-top:10px}
 
 /* 赤いスキャンライン */
-#qrReader::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 8%;
-  width: 84%;
-  height: 2px;
-  background: #ff3b30;
-  pointer-events: none;
+#qrReader::after{
+  content:"";position:absolute;top:50%;left:8%;width:84%;height:2px;
+  background:#ff3b30;pointer-events:none;opacity:.95
 }
-
 /* 説明 */
-#qrReader::before {
-  content: "赤い線にバーコードを合わせてください";
-  position: absolute;
-  top: 10px;
-  width: 100%;
-  text-align: center;
-  font-size: 13px;
-  color: #ff6b6b;
-  pointer-events: none;
+#qrReader::before{
+  content:"赤い線にバーコードを合わせてください";
+  position:absolute;top:10px;width:100%;
+  text-align:center;font-size:13px;color:#ff6b6b;pointer-events:none
 }
 
-.ok { color: #22c55e; }
-.ng { color: #ef4444; }
-.muted { color: #94a3b8; white-space: pre-line; }
-
-.storeCard {
-  display: block;
-  background: #020617;
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 10px;
-  text-decoration: none;
-  color: #fff;
+.ok{color:#22c55e}
+.ng{color:#ef4444}
+.muted{color:#94a3b8;white-space:pre-line}
+.storeCard{
+  display:block;background:#020617;border-radius:12px;padding:14px;
+  margin-bottom:10px;text-decoration:none;color:#fff
 }
 </style>
 </head>
 
 <body>
-
 <header id="title">棚卸スキャナ（店舗選択）</header>
 
 <div class="badges">
@@ -156,18 +80,18 @@ input {
       <div id="qrReader"></div>
     </div>
 
-    <input id="scanInput" placeholder="ここにフォーカス → スキャン…" />
+    <input id="scanInput" placeholder="ここにフォーカス → スキャン…" autocomplete="off" />
     <div id="msg" class="muted"></div>
   </div>
 
   <div class="card">
     <strong>現在の一致</strong>
-    <div id="current"></div>
+    <div id="current" style="margin-top:10px"></div>
   </div>
 
   <div class="card">
     <strong>スキャン履歴（今回）</strong>
-    <div id="history"></div>
+    <div id="history" style="margin-top:10px"></div>
   </div>
 
 </div>
@@ -180,125 +104,238 @@ const DATA_CSV_URL =
  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
 /* ========= 状態 ========= */
-const el = id => document.getElementById(id);
+const el = (id) => document.getElementById(id);
 const qs = new URLSearchParams(location.search);
 let STORE = (qs.get("store") || "").trim();
-const st = { all:[], rows:[], byCode:new Map(), scanned:[] };
 
-const normalize = s => String(s||"").trim();
+const st = { all: [], rows: [], byCode: new Map(), scanned: [] };
 
-/* ========= CSV ========= */
+const normalize = (s) => String(s || "").trim()
+  .replace(/\r?\n/g, "")
+  .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+
+/* ========= CSV（簡易：今回のDATAはカンマや改行が入らない想定） ========= */
 function parseCSV(t){
-  const l=t.replace(/\r/g,"").split("\n").filter(Boolean);
-  const h=l.shift().split(",");
-  return l.map(r=>{
-    const c=r.split(",");
-    const o={};
-    h.forEach((k,i)=>o[k]=c[i]||"");
-    return o;
+  const lines = t.replace(/\r/g,"").split("\n").filter(Boolean);
+  if(!lines.length) return [];
+  const header = lines.shift().split(",").map(x=>x.trim());
+  const idx = {};
+  header.forEach((h,i)=>idx[h]=i);
+
+  const pick = (cols, key) => (idx[key] == null) ? "" : (cols[idx[key]] ?? "");
+
+  return lines.map(line=>{
+    const cols = line.split(",").map(x => x.replace(/^"|"$/g,"").replace(/""/g,'"'));
+    return {
+      store_key: pick(cols,"store_key"),
+      store_name: pick(cols,"store_name"),
+      code: pick(cols,"code"),
+      machine_name: pick(cols,"machine_name"),
+      actual_stock: pick(cols,"actual_stock"),
+      updated_at: pick(cols,"updated_at"),
+    };
   });
 }
 
 /* ========= 画面 ========= */
-function setMode(m){
-  home.style.display = m==="home"?"":"none";
-  scanner.style.display = m==="scan"?"":"none";
+function setMode(mode){
+  el("home").style.display = (mode === "home") ? "" : "none";
+  el("scanner").style.display = (mode === "scan") ? "" : "none";
 }
 
 function updateBadges(){
-  storeBadge.textContent="store: "+(STORE||"HOME");
-  countBadge.textContent="rows: "+(STORE?st.rows.length:"-");
-  progressBadge.textContent="progress: "+st.scanned.length+"/"+st.rows.length;
-  updatedBadge.textContent="updated: "+(st.rows[0]?.updated_at||"-");
+  el("storeBadge").textContent = "store: " + (STORE || "HOME");
+  el("countBadge").textContent = "rows: " + (STORE ? st.rows.length : "-");
+
+  const total = STORE ? st.rows.length : 0;
+  const done = new Set(st.scanned.filter(x=>x.ok).map(x=>x.code)).size;
+  el("progressBadge").textContent = STORE ? `progress: ${done}/${total}` : "progress: -";
+
+  const u = st.rows[0]?.updated_at || st.all[0]?.updated_at || "-";
+  el("updatedBadge").textContent = "updated: " + String(u).slice(0, 10);
 }
 
 function renderHome(){
   setMode("home");
-  const map=new Map();
-  st.all.forEach(r=>map.set(r.store_key,r.store_name));
-  storeGrid.innerHTML=[...map.entries()].map(([k,n])=>
-    `<a class="storeCard" href="?store=${k}">${n}<div class="muted">${k}</div></a>`
-  ).join("");
+  el("title").textContent = "棚卸スキャナ（店舗選択）";
+
+  const map = new Map();
+  for(const r of st.all){
+    if(!r.store_key) continue;
+    if(!map.has(r.store_key)) map.set(r.store_key, r.store_name || r.store_key);
+  }
+
+  el("storeGrid").innerHTML = [...map.entries()]
+    .sort((a,b)=>String(a[1]).localeCompare(String(b[1]),"ja"))
+    .map(([k,n])=> `<a class="storeCard" href="?store=${encodeURIComponent(k)}">
+        <b>${n}</b><div class="muted">${k}</div>
+      </a>`).join("");
+
+  updateBadges();
 }
 
 function renderScan(){
   setMode("scan");
+  el("title").textContent = "棚卸スキャナ";
+  el("msg").textContent = "読込完了。入力欄にフォーカスしてスキャンしてください。";
   updateBadges();
-  scanInput.focus();
+  el("scanInput").focus();
+}
+
+function renderPanels(){
+  updateBadges();
+
+  const last = st.scanned[0];
+  if(!last){
+    el("current").innerHTML = "";
+  }else if(last.ok){
+    el("current").innerHTML =
+      `<div class="ok">✅ ${last.code}</div>` +
+      `<div>マシン: ${last.row.machine_name}</div>`;
+  }else{
+    el("current").innerHTML = `<div class="ng">❌ ${last.code}</div>`;
+  }
+
+  el("history").innerHTML = st.scanned.map(x=>{
+    return x.ok
+      ? `<div class="ok">✅ ${x.code} <span class="muted"> ${x.row.machine_name}</span></div>`
+      : `<div class="ng">❌ ${x.code}</div>`;
+  }).join("");
 }
 
 /* ========= スキャン ========= */
 function addScan(v){
-  const c=normalize(v);
-  const row=st.byCode.get(c);
-  st.scanned.unshift({code:c,row,ok:!!row});
-  msg.textContent=row?"一致しました":"一致なし";
-  current.innerHTML=row?
-    `<div class="ok">✅ ${c}<br>${row.machine_name}</div>`:
-    `<div class="ng">❌ ${c}</div>`;
-  history.innerHTML=st.scanned.map(x=>x.ok?
-    `✅ ${x.code}`:`❌ ${x.code}`).join("<br>");
+  const code = normalize(v);
+  if(!code) return;
+
+  const row = st.byCode.get(code);
+  const ok = !!row;
+
+  st.scanned.unshift({ code, row, ok, ts: Date.now() });
+
+  el("msg").textContent = ok ? "一致しました" : "一致なし（リストにありません）";
+  renderPanels();
+  el("scanInput").focus();
 }
 
 /* ========= カメラ ========= */
-let qr=null;
+let qr = null;
+let camRunning = false;
+
 async function startCamera(){
-  cameraWrap.style.display="";
-  if(!qr) qr=new Html5Qrcode("qrReader");
- const cams = await Html5Qrcode.getCameras();
-
-// ① labelで背面を探す
-let cameraId = null;
-for (const cam of cams) {
-  if (/back|rear|environment/i.test(cam.label || "")) {
-    cameraId = cam.id;
-    break;
+  if(!STORE){
+    alert("先に店舗を選択してください");
+    return;
   }
-}
+  if(camRunning) return;
 
-// ② 見つからなければ「最後のカメラ」
-if (!cameraId) {
-  cameraId = cams[cams.length - 1].id;
-}
+  el("cameraWrap").style.display = "";
+
+  if(!qr) qr = new Html5Qrcode("qrReader");
+
+  const cams = await Html5Qrcode.getCameras();
+  if(!cams || cams.length === 0){
+    alert("カメラが見つかりません");
+    el("cameraWrap").style.display = "none";
+    return;
+  }
+
+  // ✅ 背面カメラ優先（labelが空の時は「最後のカメラ」を採用）
+  let cameraId = null;
+  for(const cam of cams){
+    if(/back|rear|environment/i.test(cam.label || "")){
+      cameraId = cam.id;
+      break;
+    }
+  }
+  if(!cameraId) cameraId = cams[cams.length - 1].id;
+
+  camRunning = true;
 
   await qr.start(
-    {deviceId:{exact:id}},
+    { deviceId: { exact: cameraId } },
     {
-      fps:15,
-      qrbox:{width:320,height:120},
-      disableFlip:true,
-      formatsToSupport:[
+      fps: 15,
+      // ✅ 縦画面で横長バーコードを狙いやすい枠
+      qrbox: { width: 320, height: 120 },
+      disableFlip: true,
+      // ✅ 1Dバーコード中心（JAN/Code128想定）
+      formatsToSupport: [
         Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.CODE_128
-      ]
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+      ],
     },
-    t=>{stopCamera();addScan(t);}
+    (text) => {
+      stopCamera();
+      addScan(text);
+    },
+    (_err) => {
+      // 読取中エラーは無視
+    }
   );
 }
+
 async function stopCamera(){
-  cameraWrap.style.display="none";
-  if(qr) await qr.stop();
+  el("cameraWrap").style.display = "none";
+  if(!qr || !camRunning) return;
+  try{
+    await qr.stop();
+  }catch(_e){
+    // iOSでたまにstop例外になるが無視でOK
+  }finally{
+    camRunning = false;
+  }
 }
 
 /* ========= 起動 ========= */
-(async()=>{
-  const csv=await fetch(DATA_CSV_URL).then(r=>r.text());
-  st.all=parseCSV(csv);
-  if(STORE){
-    st.rows=st.all.filter(r=>r.store_key===STORE);
-    st.rows.forEach(r=>st.byCode.set(normalize(r.code),r));
-    renderScan();
-  }else{
-    renderHome();
-  }
-})();
+(async () => {
+  // UI
+  el("btnHome").onclick = () => location.href = "./";
+  el("btnClear").onclick = () => { st.scanned = []; renderPanels(); el("msg").textContent = "今回分をクリアしました"; };
+  el("btnCamera").onclick = () => startCamera();
+  el("btnStopCamera").onclick = () => stopCamera();
 
-btnCamera.onclick=startCamera;
-btnStopCamera.onclick=stopCamera;
-btnHome.onclick=()=>location.href="./";
-scanInput.onkeydown=e=>{
-  if(e.key==="Enter"){addScan(scanInput.value);scanInput.value="";}
-};
+  el("scanInput").addEventListener("keydown", (e) => {
+    if(e.key === "Enter"){
+      e.preventDefault();
+      addScan(el("scanInput").value);
+      el("scanInput").value = "";
+    }
+  });
+
+  // iOSでフォーカスが外れやすい対策（軽め）
+  document.addEventListener("touchstart", () => {
+    const inp = el("scanInput");
+    if(document.activeElement !== inp) inp.focus();
+  }, { passive: true });
+
+  // DATA
+  const csvText = await fetch(DATA_CSV_URL, { cache: "no-store" }).then(r => r.text());
+  st.all = parseCSV(csvText);
+
+  // 初期store
+  const init = (new URLSearchParams(location.search)).get("store") || "";
+  STORE = init.trim();
+
+  if(!STORE){
+    renderHome();
+    return;
+  }
+
+  st.rows = st.all.filter(r => String(r.store_key).trim() === STORE);
+  st.byCode.clear();
+  for(const r of st.rows){
+    const k = normalize(r.code);
+    if(k) st.byCode.set(k, r);
+  }
+
+  renderScan();
+  renderPanels();
+})();
 </script>
 
 </body>
