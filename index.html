@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>棚卸スキャナ</title>
+  <link rel="stylesheet" href="./style.css" />
+  <!-- SheetJS (xlsx) : ブラウザでExcel読込/生成 -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">棚卸スキャナ</div>
+    <div class="actions">
+      <label class="btn">
+        原本Excelを読み込む
+        <input id="file" type="file" accept=".xlsx,.xls" hidden />
+      </label>
+      <button id="btnFinish" class="btn primary" disabled>終了してExcel排出</button>
+      <button id="btnClear" class="btn ghost" disabled>今回分をクリア</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>スキャン入力</h2>
+      <p class="muted">
+        ※ スキャナは「キーボード入力＋Enter」想定。ここにフォーカスしたまま読み取ってください。
+      </p>
+      <input id="scanBox" class="scanBox" placeholder="ここにフォーカス → スキャン…" disabled />
+      <div id="status" class="status">原本Excelを読み込んでください</div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>現在の表示</h2>
+        <div id="current" class="current">—</div>
+      </div>
+
+      <div class="card">
+        <h2>スキャン履歴（今回）</h2>
+        <div id="history" class="history">—</div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
