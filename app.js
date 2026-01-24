@@ -336,7 +336,13 @@ async function applyZoomFromUI(){
 async function startCamera(){
   if(!STORE){ alert("先に店舗を選択してください"); return; }
   if(camRunning) return;
+　el("camStatus").textContent =
+  ("BarcodeDetector" in window)
+    ? "BarcodeDetector: OK（バーコード対応の可能性あり）"
+    : "BarcodeDetector: NG（この環境では1Dバーコードが読めない可能性）";
 
+
+ 
   openCamModal();
 
   if(!qr) qr = new Html5Qrcode("qrReader");
