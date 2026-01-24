@@ -1,8 +1,8 @@
 /* ========= 設定 ========= */
 const DATA_CSV_URL =
- "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
-// 連続スキャン時の誤連打抑制（同じコードが連続で来るのを防ぐ）
+// 連続スキャン時の誤連打抑制
 const SAME_CODE_COOLDOWN_MS = 900;   // 同一コードは0.9秒は無視
 const ANY_CODE_COOLDOWN_MS  = 180;   // 連打全体も少し抑制
 
@@ -44,6 +44,7 @@ function codeVariants(raw){
 
 /* ========= CSV ========= */
 function parseCSV(t){
+  // ※CSV内にカンマが含まれる可能性があるなら、ここは後で強化が必要
   const lines = t.replace(/\r/g,"").split("\n").filter(Boolean);
   if(!lines.length) return [];
   const header = lines.shift().split(",").map(x=>x.trim());
@@ -86,6 +87,7 @@ function vibrateDone(){ try{ if(navigator.vibrate) navigator.vibrate([120,60,120
 let toastTimer = null;
 function showToast(text){
   const t = el("toast");
+  if(!t) return;
   t.textContent = text;
   t.classList.add("show");
   t.setAttribute("aria-hidden","false");
@@ -212,7 +214,7 @@ function renderPanels(){
   }).join("");
 }
 
-/* ✅ 未取得：グリッド描画 */
+/* 未スキャン一覧：グリッド描画 */
 function renderRemainGrid(){
   if(!STORE) return;
   const remainRows = st.rows.filter(r => !st.okSet.has(normalize(r.code)));
@@ -257,7 +259,6 @@ function addScan(v){
       vibrateOk();
       showToast(`✅ ${hitRow.code} ／ ${hitRow.machine_name || "-"}`);
     }else{
-      // 同じものを再スキャンした時は弱め
       try{ if(navigator.vibrate) navigator.vibrate(30); }catch(_e){}
       showToast(`✅（再）${hitRow.code}`);
     }
@@ -321,52 +322,60 @@ async function applyCameraTuning(){
 
 async function applyZoomFromUI(){
   if(!qr) return;
-  const z = Number(el("zoomRange")?.value || 1);
-  el("zoomVal").textContent = `${z.toFixed(1)}x`;
+  const zr = el("zoomRange");
+  const zv = el("zoomVal");
+  if(!zr || !zv) return;
+
+  const z = Number(zr.value || 1);
+  zv.textContent = `${z.toFixed(1)}x`;
 
   try{
-    await qr.applyVideoConstraints({
-      advanced: [{ zoom: z }]
-    });
+    await qr.applyVideoConstraints({ advanced: [{ zoom: z }] });
   }catch(_e){
     // iOS等、zoom制約が効かない端末では無視
   }
 }
 
+/* iPhoneで「無反応」対策：Status表示＋推奨フラグON */
+function setCamStatus(){
+  const s = el("camStatus");
+  if(!s) return;
+
+  const bd = ("BarcodeDetector" in window);
+  // 補足：SafariはOKでも読めない場合があるので強い言い切りは避ける
+  s.textContent = bd
+    ? "BarcodeDetector: OK（対応の可能性あり）"
+    : "BarcodeDetector: NG（この環境は1Dバーコードが読めない可能性）";
+}
+
 async function startCamera(){
   if(!STORE){ alert("先に店舗を選択してください"); return; }
   if(camRunning) return;
-　el("camStatus").textContent =
-  ("BarcodeDetector" in window)
-    ? "BarcodeDetector: OK（バーコード対応の可能性あり）"
-    : "BarcodeDetector: NG（この環境では1Dバーコードが読めない可能性）";
 
-
- 
+  setCamStatus();
   openCamModal();
 
   if(!qr) qr = new Html5Qrcode("qrReader");
 
-const config = {
-  fps: 10,
-  qrbox: makeQrbox(),
-  disableFlip: true,
+  const config = {
+    fps: 10,
+    qrbox: makeQrbox(),
+    disableFlip: true,
 
-  // ✅ 追加（重要）
-  experimentalFeatures: {
-    useBarCodeDetectorIfSupported: true
-  },
+    // ✅ ここが重要（対応環境では1Dが上がる）
+    experimentalFeatures: {
+      useBarCodeDetectorIfSupported: true
+    },
 
-  formatsToSupport: [
-    Html5QrcodeSupportedFormats.EAN_13,
-    Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.UPC_A,
-    Html5QrcodeSupportedFormats.UPC_E,
-    Html5QrcodeSupportedFormats.CODE_128,
-    Html5QrcodeSupportedFormats.CODE_39,
-  ],
-};
-
+    formatsToSupport: [
+      Html5QrcodeSupportedFormats.EAN_13,
+      Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A,
+      Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.CODE_39,
+    ],
+  };
 
   const onOk = (text) => {
     const now = Date.now();
@@ -388,7 +397,8 @@ const config = {
 
     // ✅ 連続スキャン：止めない／閉じない
   };
-  const onErr = (_) => {};
+
+  const onErr = (_)=>{};
 
   camRunning = true;
 
@@ -456,6 +466,7 @@ async function stopCamera(){
   };
   el("btnShowRemain").onclick = () => renderRemainGrid();
 
+  // 手入力/スキャナ入力
   el("scanInput").addEventListener("keydown", (e) => {
     if(e.key === "Enter"){
       e.preventDefault();
@@ -497,3 +508,4 @@ async function stopCamera(){
   renderScan();
   renderPanels();
 })();
+
