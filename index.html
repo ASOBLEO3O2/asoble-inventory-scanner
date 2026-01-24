@@ -252,31 +252,29 @@ async function startCamera(){
 
   camRunning = true;
 
-  await qr.start(
-    { deviceId: { exact: cameraId } },
-    {
-      fps: 15,
-      // ✅ 縦画面で横長バーコードを狙いやすい枠
-      qrbox: { width: 320, height: 120 },
-      disableFlip: true,
-      // ✅ 1Dバーコード中心（JAN/Code128想定）
-      formatsToSupport: [
-        Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.EAN_8,
-        Html5QrcodeSupportedFormats.UPC_A,
-        Html5QrcodeSupportedFormats.UPC_E,
-        Html5QrcodeSupportedFormats.CODE_128,
-        Html5QrcodeSupportedFormats.CODE_39,
-      ],
-    },
-    (text) => {
-      stopCamera();
-      addScan(text);
-    },
-    (_err) => {
-      // 読取中エラーは無視
-    }
-  );
+await qr.start(
+  { facingMode: "environment" }, // ✅ 背面カメラ優先（iPhoneで安定しやすい）
+  {
+    fps: 12,
+    qrbox: { width: 360, height: 120 }, // ✅ 横長バーコード向け
+    disableFlip: true,
+    formatsToSupport: [
+      Html5QrcodeSupportedFormats.EAN_13,
+      Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A,
+      Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.CODE_39,
+    ],
+  },
+  (text) => {
+    stopCamera();
+    addScan(text);
+  },
+  (_err) => {}
+);
+
+ 
 }
 
 async function stopCamera(){
