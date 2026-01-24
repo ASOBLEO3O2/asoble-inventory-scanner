@@ -245,8 +245,22 @@ let qr=null;
 async function startCamera(){
   cameraWrap.style.display="";
   if(!qr) qr=new Html5Qrcode("qrReader");
-  const cams=await Html5Qrcode.getCameras();
-  const id=cams[0].id;
+ const cams = await Html5Qrcode.getCameras();
+
+// ① labelで背面を探す
+let cameraId = null;
+for (const cam of cams) {
+  if (/back|rear|environment/i.test(cam.label || "")) {
+    cameraId = cam.id;
+    break;
+  }
+}
+
+// ② 見つからなければ「最後のカメラ」
+if (!cameraId) {
+  cameraId = cams[cams.length - 1].id;
+}
+
   await qr.start(
     {deviceId:{exact:id}},
     {
