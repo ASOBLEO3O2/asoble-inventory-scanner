@@ -14,8 +14,9 @@
 </head>
 
 <body>
-  <header id="title">棚卸スキャナ（店舗選択）</header>
+  <header id="title">棚卸スキャナ</header>
 
+  <!-- 既存のbadgesは流用（表示内容はJS側で更新） -->
   <div class="badges">
     <div class="badge" id="storeBadge">store: HOME</div>
     <div class="badge" id="countBadge">rows: -</div>
@@ -26,32 +27,32 @@
   </div>
 
   <main>
-    <div id="home" class="card">
-      <div class="muted small">店舗を選ぶとスキャン画面に移動します。</div>
+    <!-- ① 店舗選択 -->
+    <div id="storeSelect" class="card">
+      <div class="muted small">店舗を選ぶとホーム（状況確認）に移動します。</div>
       <div id="storeGrid" class="storeGrid"></div>
     </div>
 
-    <div id="scanner" style="display:none">
+    <!-- ② ホーム（状況確認） -->
+    <div id="homeStatus" style="display:none">
       <div class="card">
-        <button id="btnHome" class="secondary">店舗一覧</button>
-        <button id="btnClear" class="secondary">今回をクリア</button>
+        <button id="btnToStoreList" class="secondary">店舗一覧</button>
+        <button id="btnReset" class="secondary">リセット</button>
         <button id="btnShowRemain" class="secondary">未スキャン一覧</button>
+        <button id="btnStartScan">📷 読み取り開始</button>
       </div>
 
       <div class="card">
         <p class="muted">
-          ※ バーコード or シール番号（OCR）で反応します<br />
-          カメラは全画面で連続スキャン（閉じません）
+          ※ 読み取りは「2回連続で同じコード」になったら確定します（誤読対策）<br />
+          一致なし（INVALID）は履歴に残しません（ngのみカウント）
         </p>
-
-        <button id="btnCamera">📷 カメラでスキャン（全画面・連続）</button>
 
         <div class="progressWrap">
           <div class="muted small" id="progressText">progress: -</div>
           <div class="progressBar"><div class="progressFill" id="progressFill"></div></div>
         </div>
 
-        <input id="scanInput" placeholder="ここにフォーカス → スキャン…" autocomplete="off" />
         <div id="msg" class="muted"></div>
       </div>
 
@@ -71,6 +72,24 @@
         <div id="remainList" class="remainGrid"></div>
       </div>
     </div>
+
+    <!-- ③ 読み取り画面（カメラ起動の入口） -->
+    <div id="scanScreen" style="display:none">
+      <div class="card">
+        <button id="btnBackHome" class="secondary">← ホームへ戻る</button>
+        <button id="btnCamera">📷 カメラでスキャン（全画面・連続）</button>
+      </div>
+
+      <div class="card">
+        <div class="muted small">
+          ※ ここは読み取り専用です。状況確認（履歴/未スキャン）はホームで見ます。
+        </div>
+
+        <!-- 手入力/レーザースキャナ入力（必要なら） -->
+        <input id="scanInput" placeholder="（任意）ここにフォーカス → スキャン…" autocomplete="off" />
+        <div class="muted small" style="margin-top:8px">Enterで確定（一致したものだけ記録）</div>
+      </div>
+    </div>
   </main>
 
   <div id="doneOverlay">
@@ -81,13 +100,13 @@
     </div>
   </div>
 
-  <!-- カメラ全画面モーダル（video + overlay を分離して崩れにくく） -->
+  <!-- カメラ全画面モーダル（既存レイアウト維持） -->
   <div id="camModal" aria-hidden="true">
     <div id="camTop">
       <div class="camTopLeft">
         <div id="camStatus" class="camStatus">camera: -</div>
-        <div id="camHint" class="camHint">バーコードはなるべく正対／番号でもOK</div>
-        <div class="camSubHint">※ 15〜25cm目安／ズームで反応が上がります</div>
+        <div id="camHint" class="camHint">バーコード帯を枠に入れる／番号でもOK</div>
+        <div class="camSubHint">※ 読めない時は距離を少し変える（近すぎ/遠すぎ）</div>
       </div>
 
       <div class="camTopRight">
@@ -105,29 +124,23 @@
     <div id="videoWrap">
       <video id="camVideo" playsinline muted></video>
 
-      <!-- overlay（videoと別レイヤー） -->
+      <!-- overlay -->
       <div id="overlay" aria-hidden="true">
         <div class="guideText">バーコード帯をここに（読めない時は番号でもOK）</div>
 
-        <!-- バーコード帯ガイド：水平2本（斜め弱さ対策） -->
         <div class="band top"></div>
         <div class="band bottom"></div>
 
-        <!-- コーナー（薄め） -->
         <div class="corner tl"></div>
         <div class="corner tr"></div>
         <div class="corner br"></div>
         <div class="corner bl"></div>
 
-        <!-- flash（成功時） -->
         <div id="flash" class="flash"></div>
       </div>
     </div>
 
-    <!-- 成功トースト -->
     <div id="toast" class="toast" aria-hidden="true"></div>
-
-    <!-- OCRワーカー初期化中など -->
     <div id="ocrBadge" class="ocrBadge" aria-hidden="true">OCR準備中…</div>
   </div>
 
