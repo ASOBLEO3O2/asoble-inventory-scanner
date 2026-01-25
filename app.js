@@ -2,12 +2,17 @@
 const DATA_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
-// 連続検出の誤連打抑制
-const SAME_CODE_COOLDOWN_MS = 900;   // 同一コードは0.9秒は無視
-const ANY_CODE_COOLDOWN_MS  = 180;   // 全体も少し抑制
+// 既存の連打抑制（残す）
+const SAME_CODE_COOLDOWN_MS = 900;   // 同一コードは0.9秒は無視（旧）
+const ANY_CODE_COOLDOWN_MS  = 180;   // 全体も少し抑制（旧）
+
+// 仕様：確定条件（2回一致）＋確定後停止
+const CONFIRM_HITS_REQUIRED = 2;
+const CONFIRM_WINDOW_MS     = 1200; // 2回一致を待つ猶予
+const CONFIRM_COOLDOWN_MS   = 1000; // 確定後は1秒停止
 
 // OCRの頻度（バーコードが来ない時だけ動かす）
-const OCR_INTERVAL_MS = 700;         // 0.7秒毎
+const OCR_INTERVAL_MS = 700;           // 0.7秒毎
 const OCR_MIN_GAP_AFTER_HIT_MS = 1200; // 直近でHITしたらOCRしない
 
 /* ========= 状態 ========= */
@@ -19,10 +24,51 @@ const st = {
   all: [],
   rows: [],
   byCode: new Map(),
-  scanned: [],
+
+  // 履歴（OK/DUPのみ保存）
+  scanned: [],   // { code, row, ok:true, dup:boolean, ts }
   okSet: new Set(),
+
+  // INVALIDは記録しない（カウンタのみ）
   ngCount: 0
 };
+
+/* ========= 画面切替 ========= */
+function setMode(m){
+  el("storeSelect").style.display = (m==="store") ? "" : "none";
+  el("homeStatus").style.display  = (m==="home")  ? "" : "none";
+  el("scanScreen").style.display  = (m==="scan")  ? "" : "none";
+}
+
+function goStoreSelect(){
+  setMode("store");
+  el("title").textContent = "棚卸スキャナ（店舗選択）";
+  updateBadges();
+}
+
+function goHome(){
+  setMode("home");
+  el("title").textContent = "棚卸スキャナ（ホーム）";
+  el("msg").textContent = "ホーム：状況確認／読み取り開始";
+  updateBadges();
+  renderPanels();
+}
+
+function goScanScreen({ autoStartCamera = false } = {}){
+  if(!STORE){
+    alert("先に店舗を選択してください");
+    goStoreSelect();
+    return;
+  }
+  setMode("scan");
+  el("title").textContent = "棚卸スキャナ（読み取り）";
+  try{ el("scanInput").focus(); }catch(_e){}
+  updateBadges();
+
+  if(autoStartCamera){
+    startCamera();
+  }
+}
 
 /* ========= 正規化 ========= */
 const normalize = (s) => String(s ?? "")
@@ -69,10 +115,6 @@ function parseCSV(t){
 }
 
 /* ========= UI helpers ========= */
-function setMode(m){
-  el("home").style.display = (m==="home") ? "" : "none";
-  el("scanner").style.display = (m==="scan") ? "" : "none";
-}
 function pct(n){
   if(!isFinite(n)) return "0.0";
   return (Math.round(n*10)/10).toFixed(1);
@@ -86,7 +128,7 @@ function escapeHtml(s){
     .replaceAll("'","&#39;");
 }
 
-// iOSは振動がほぼ無理（Chromeでも中身WebKit）→ 代替の音/フラッシュを強める
+// iOSは振動がほぼ無理 → 代替の音/フラッシュ
 function vibrateOk(){
   try{ if(navigator.vibrate) navigator.vibrate([60,30,60]); }catch(_e){}
 }
@@ -94,7 +136,7 @@ function vibrateDone(){
   try{ if(navigator.vibrate) navigator.vibrate([120,60,120,60,220]); }catch(_e){}
 }
 
-// 成功時：音（iOSでも鳴りやすいよう、最初のユーザー操作後に使う）
+// 成功時：音
 let audioCtx = null;
 function beep(){
   try{
@@ -154,8 +196,11 @@ function updateBadges(){
     el("remainBadge").textContent="remain: -";
     el("ngBadge").textContent="ng: 0";
     el("updatedBadge").textContent="updated: " + String(st.all[0]?.updated_at || "-").slice(0,10);
-    el("progressText").textContent="progress: -";
-    el("progressFill").style.width="0%";
+
+    const pt = el("progressText");
+    if(pt) pt.textContent="progress: -";
+    const pf = el("progressFill");
+    if(pf) pf.style.width="0%";
     return;
   }
 
@@ -169,8 +214,10 @@ function updateBadges(){
   el("ngBadge").textContent = `ng: ${st.ngCount}`;
   el("updatedBadge").textContent = "updated: " + String(st.rows[0]?.updated_at || st.all[0]?.updated_at || "-").slice(0,10);
 
-  el("progressText").textContent = `progress: ${done}/${total} (${pct(p)}%)  remain:${remain}`;
-  el("progressFill").style.width = `${Math.min(100, Math.max(0,p))}%`;
+  const pt = el("progressText");
+  if(pt) pt.textContent = `progress: ${done}/${total} (${pct(p)}%)  remain:${remain}`;
+  const pf = el("progressFill");
+  if(pf) pf.style.width = `${Math.min(100, Math.max(0,p))}%`;
 }
 
 /* ========= 描画 ========= */
@@ -189,9 +236,8 @@ function renderHitRow(row){
   `;
 }
 
-function renderHome(){
-  setMode("home");
-  el("title").textContent = "棚卸スキャナ（店舗選択）";
+function renderStoreSelect(){
+  goStoreSelect();
 
   const map = new Map();
   for(const r of st.all){
@@ -209,38 +255,26 @@ function renderHome(){
   updateBadges();
 }
 
-function renderScan(){
-  setMode("scan");
-  el("title").textContent = "棚卸スキャナ";
-  el("msg").textContent = "読込完了。入力欄にフォーカスしてスキャンしてください。";
-  el("remainCard").style.display = "none";
-  updateBadges();
-  el("scanInput").focus();
-}
-
 function renderPanels(){
   updateBadges();
 
   const last = st.scanned[0];
   if(!last){
     el("current").innerHTML = "";
-  }else if(last.ok){
-    el("current").innerHTML = renderHitRow(last.row);
   }else{
-    el("current").innerHTML = `<div class="ng">❌ ${escapeHtml(last.code)}</div>`;
+    el("current").innerHTML = renderHitRow(last.row);
   }
 
+  // 履歴はOK/DUPのみ
   el("history").innerHTML = st.scanned.slice(0, 60).map(x=>{
-    if(!x.ok){
-      return `<div class="ng">❌ ${escapeHtml(x.code)}</div>`;
-    }
     const key = normalize(x.row.code);
     const done = st.okSet.has(key);
     const cls = `hitRow okRow ${done ? "done" : ""}`;
+    const prefix = x.dup ? "⚠️（重複）" : "✅";
     return `
       <div class="${cls}">
         <div class="meta">
-          <span class="code">✅ ${escapeHtml(x.row.code)}</span>
+          <span class="code">${prefix} ${escapeHtml(x.row.code)}</span>
           <span class="tag">${done ? "済" : "未"}</span>
         </div>
         <div class="machine">${escapeHtml(x.row.machine_name || "-")}</div>
@@ -267,8 +301,8 @@ function renderRemainGrid(){
   el("remainCard").scrollIntoView({ behavior:"smooth", block:"start" });
 }
 
-/* ========= スキャン確定 ========= */
-function addScan(v){
+/* ========= スキャン確定（OK/DUPのみ記録。INVALIDは記録しない） ========= */
+function addScan(v, { source = "unknown" } = {}){
   const variants = codeVariants(v);
   if(!variants.length) return;
 
@@ -289,39 +323,49 @@ function addScan(v){
   if(ok){
     const before = st.okSet.size;
     st.okSet.add(hitKey);
-    if(st.okSet.size > before){
+
+    const isDup = !(st.okSet.size > before);
+
+    if(!isDup){
       vibrateOk();
       beep();
       flash();
       showToast(`✅ ${hitRow.code} ／ ${hitRow.machine_name || "-"}`);
-      lastHitTs = Date.now();
     }else{
-      // 再スキャン（弱め）
-      try{ if(navigator.vibrate) navigator.vibrate(30); }catch(_e){}
-      showToast(`✅（再）${hitRow.code}`);
-      lastHitTs = Date.now();
+      // 重複：強め警告（履歴には残す）
+      try{ if(navigator.vibrate) navigator.vibrate([120,40,120]); }catch(_e){}
+      showToast(`⚠️ 重複：${hitRow.code}`);
     }
+
+    st.scanned.unshift({ code: variants[0], row: hitRow, ok: true, dup: isDup, ts: Date.now(), source });
+    el("msg").textContent = "一致しました（連続スキャン中）";
+
+    renderPanels();
+    showDoneIfComplete();
   }else{
+    // INVALID：記録しない（カウンタだけ）
     st.ngCount++;
-    showToast(`❌ 一致なし`);
+    el("msg").textContent = "一致なし（リストにありません）";
+    showToast("❌ 一致なし");
+    updateBadges();
   }
-
-  st.scanned.unshift({ code: variants[0], row: hitRow, ok, ts: Date.now() });
-  el("msg").textContent = ok ? "一致しました（連続スキャン中）" : "一致なし（リストにありません）";
-
-  renderPanels();
-  showDoneIfComplete();
 }
 
 /* ========= カメラ（ZXing + OCR） ========= */
 let camRunning = false;
 let stream = null;
 
-// debounce
+// debounce（旧）
 let lastAnyTs = 0;
 let lastText = "";
 let lastTextTs = 0;
 let lastHitTs = 0;
+
+// 2回一致用
+let candText = "";
+let candCount = 0;
+let candTs = 0;
+let confirmCooldownUntil = 0;
 
 // video
 const videoEl = () => el("camVideo");
@@ -380,8 +424,6 @@ async function applyZoomFromUI(){
   if(!zr || !zv) return;
   const z = Number(zr.value || 1);
   zv.textContent = `${z.toFixed(1)}x`;
-
-  // zoomは対応端末のみ
   await applyTrackConstraints({ zoom: z });
 }
 
@@ -397,6 +439,50 @@ async function toggleTorch(){
   }
 }
 
+/* 2回一致判定（バーコード用） */
+function ingestBarcodeText(raw){
+  const now = Date.now();
+
+  // 確定後クールダウン
+  if(now < confirmCooldownUntil) return;
+
+  // 旧：全体連打抑制
+  if(now - lastAnyTs < ANY_CODE_COOLDOWN_MS) return;
+
+  const n = normalize(raw);
+  if(!n) return;
+
+  // 旧：同一コード連続抑制（過剰連打を落とす）
+  if(n === lastText && (now - lastTextTs) < SAME_CODE_COOLDOWN_MS) return;
+
+  lastAnyTs = now;
+  lastText = n;
+  lastTextTs = now;
+
+  // 2回一致ロジック
+  if(n !== candText || (now - candTs) > CONFIRM_WINDOW_MS){
+    candText = n;
+    candCount = 1;
+    candTs = now;
+    // UIヒント（軽く）
+    setCamStatus("camera: ON / ZXing: ON / OCR: ON（フォールバック）");
+    return;
+  }
+
+  candCount++;
+  candTs = now;
+
+  if(candCount >= CONFIRM_HITS_REQUIRED){
+    // 確定
+    candText = "";
+    candCount = 0;
+    confirmCooldownUntil = now + CONFIRM_COOLDOWN_MS;
+
+    addScan(raw, { source: "zxing" });
+    lastHitTs = Date.now();
+  }
+}
+
 /* OCR: 画面中央の“帯”だけ切り出して、番号候補を拾う */
 function createOcrCanvasFromVideo(){
   const v = videoEl();
@@ -404,7 +490,6 @@ function createOcrCanvasFromVideo(){
   const vh = v.videoHeight || 0;
   if(!vw || !vh) return null;
 
-  // 中央帯（バーコード帯＋番号が入りやすい範囲）
   const bandH = Math.floor(vh * 0.28);
   const sy = Math.floor((vh - bandH) / 2);
   const sx = Math.floor(vw * 0.10);
@@ -412,7 +497,6 @@ function createOcrCanvasFromVideo(){
   const sh = bandH;
 
   const canvas = document.createElement("canvas");
-  // OCR用に少し拡大して精度UP（重すぎない範囲）
   canvas.width = 900;
   canvas.height = Math.floor(900 * (sh / sw));
 
@@ -420,14 +504,11 @@ function createOcrCanvasFromVideo(){
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(v, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
 
-  // ちょいコントラスト（簡易）
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const d = img.data;
   for(let i=0;i<d.length;i+=4){
     const r=d[i], g=d[i+1], b=d[i+2];
-    // グレースケール
     let y = (0.2126*r + 0.7152*g + 0.0722*b);
-    // コントラスト
     y = (y - 128) * 1.25 + 128;
     y = Math.max(0, Math.min(255, y));
     d[i]=d[i+1]=d[i+2]=y;
@@ -440,14 +521,12 @@ function createOcrCanvasFromVideo(){
 function extractCandidatesFromText(text){
   const raw = String(text || "").toUpperCase();
 
-  // よくある誤読補正（最低限）
   const fixed = raw
     .replaceAll("O","0")
     .replaceAll("I","1")
     .replaceAll("L","1")
     .replaceAll("S","5");
 
-  // 英数の塊を抽出（長さ4以上）
   const parts = fixed.split(/[^A-Z0-9]+/g).filter(Boolean);
   const cand = [];
 
@@ -455,23 +534,21 @@ function extractCandidatesFromText(text){
     if(p.length < 4) continue;
     cand.push(p);
 
-    // 数字だけも候補に
     const digits = p.replace(/\D/g,"");
     if(digits.length >= 4) cand.push(digits);
   }
 
-  // 重複除去
   return [...new Set(cand)];
 }
 
 function tryHitByCandidates(cands){
   for(const c of cands){
-    // codeVariantsで照合を強化
     const vars = codeVariants(c);
     for(const v of vars){
       const row = st.byCode.get(v);
       if(row){
-        addScan(row.code); // “正規のcode”を確定として入れる
+        // OCRはフォールバックなので、ここは1回で確定してOK（運用優先）
+        addScan(row.code, { source: "ocr" });
         return true;
       }
     }
@@ -479,21 +556,15 @@ function tryHitByCandidates(cands){
   return false;
 }
 
-/* OCRワーカーを起動（初回は重いのでバッジ表示） */
+/* OCRワーカーを起動 */
 async function ensureOcrWorker(){
   if(ocrWorker) return;
 
   setOcrBadge(true, "OCR準備中…（初回だけ数秒）");
 
   // @ts-ignore
-  ocrWorker = await Tesseract.createWorker("eng", 1, {
-    logger: (m) => {
-      // 必要ならログ表示も可能（普段は黙らせる）
-      // console.log(m);
-    }
-  });
+  ocrWorker = await Tesseract.createWorker("eng", 1, { logger: (_m) => {} });
 
-  // 文字セットを絞って高速化＆精度UP
   await ocrWorker.setParameters({
     tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     preserve_interword_spaces: "1",
@@ -502,7 +573,7 @@ async function ensureOcrWorker(){
   setOcrBadge(false);
 }
 
-/* OCRループ：バーコードが来ない時だけ動かす */
+/* OCRループ */
 function startOcrLoop(){
   stopOcrLoop();
   ocrTimer = setInterval(async ()=>{
@@ -510,11 +581,13 @@ function startOcrLoop(){
     if(ocrBusy) return;
 
     const now = Date.now();
-    if(now - lastHitTs < OCR_MIN_GAP_AFTER_HIT_MS) return; // 直近HITなら走らせない
+    if(now - lastHitTs < OCR_MIN_GAP_AFTER_HIT_MS) return;
 
-    // なるべく軽く：videoが生きているか
     const v = videoEl();
     if(!v || !v.videoWidth) return;
+
+    // 確定後クールダウン中は走らせない
+    if(now < confirmCooldownUntil) return;
 
     ocrBusy = true;
     try{
@@ -529,16 +602,15 @@ function startOcrLoop(){
       const text = res?.data?.text || "";
 
       const cands = extractCandidatesFromText(text);
-      // console.log("[OCR]", text, cands);
-
       if(cands.length){
         const hit = tryHitByCandidates(cands);
         if(hit){
           lastHitTs = Date.now();
+          confirmCooldownUntil = Date.now() + CONFIRM_COOLDOWN_MS;
         }
       }
     }catch(_e){
-      // OCRは落ちても運用は継続
+      // OCRは落ちても継続
     }finally{
       setOcrBadge(false);
       ocrBusy = false;
@@ -564,30 +636,12 @@ function startZxingLoop(){
   // @ts-ignore
   zxingReader = new window.ZXingBrowser.BrowserMultiFormatReader();
 
-  // decodeFromVideoElementContinuously がUMDにあるが、環境差を避けて safe に実装
   // @ts-ignore
-  const controls = zxingReader.decodeFromVideoElement(videoEl(), (result, err) => {
-    const now = Date.now();
-
-    // 連打抑制
-    if(now - lastAnyTs < ANY_CODE_COOLDOWN_MS) return;
-
+  const controls = zxingReader.decodeFromVideoElement(videoEl(), (result, _err) => {
     if(result && result.getText){
       const text = result.getText();
-      const n = normalize(text);
-      if(!n) return;
-
-      // 同一コード連続抑制
-      if(n === lastText && (now - lastTextTs) < SAME_CODE_COOLDOWN_MS) return;
-
-      lastAnyTs = now;
-      lastText = n;
-      lastTextTs = now;
-
-      addScan(text);
-      lastHitTs = Date.now();
+      ingestBarcodeText(text);
     }
-    // err は無視（NotFoundなど常時出る）
   });
 
   zxingStopFn = () => {
@@ -610,7 +664,6 @@ async function startCamera(){
     if(audioCtx.state === "suspended") await audioCtx.resume();
   }catch(_e){}
 
-  // getUserMedia
   try{
     stream = await navigator.mediaDevices.getUserMedia({
       video: {
@@ -620,26 +673,25 @@ async function startCamera(){
       },
       audio: false
     });
-  }catch(e){
+  }catch(_e){
     closeCamModal();
     alert("カメラ起動に失敗しました（権限/HTTPS/端末）");
     return;
   }
 
-  // video attach
   const v = videoEl();
   v.srcObject = stream;
   try{ await v.play(); }catch(_e){}
 
   camRunning = true;
 
-  // 初期ズーム適用（対応端末のみ）
+  // 初期値リセット
+  candText = ""; candCount = 0; candTs = 0;
+  confirmCooldownUntil = 0;
+
   await applyZoomFromUI();
 
-  // ZXing開始
   startZxingLoop();
-
-  // OCR開始
   startOcrLoop();
 }
 
@@ -652,29 +704,22 @@ async function stopCamera(){
 
   camRunning = false;
 
-  // stop loops
   stopOcrLoop();
+
   if(zxingStopFn){
     try{ zxingStopFn(); }catch(_e){}
     zxingStopFn = null;
   }
-  try{
-    zxingReader?.reset?.();
-  }catch(_e){}
+  try{ zxingReader?.reset?.(); }catch(_e){}
   zxingReader = null;
 
-  // stop stream
-  try{
-    stream?.getTracks?.().forEach(t => t.stop());
-  }catch(_e){}
+  try{ stream?.getTracks?.().forEach(t => t.stop()); }catch(_e){}
   stream = null;
 
-  // OCR workerは保持（次回起動を高速化）
-  // ※メモリ厳しい端末なら stop 時に terminate してもOK
-  // if(ocrWorker){ await ocrWorker.terminate(); ocrWorker=null; }
-
   closeCamModal();
-  el("scanInput").focus();
+
+  // 読み取り画面に戻したい → scanScreen の入力へ
+  try{ el("scanInput").focus(); }catch(_e){}
 }
 
 /* ========= 起動 ========= */
@@ -698,46 +743,68 @@ async function stopCamera(){
     applyZoomFromUI();
   });
 
-  // UI
-  el("btnHome").onclick = () => location.href="./";
-  el("btnClear").onclick = () => {
+  // 画面操作
+  el("btnToStoreList").onclick = () => location.href = "./";
+  el("btnBackHome").onclick = () => goHome();
+
+  el("btnStartScan").onclick = () => goScanScreen({ autoStartCamera: true });
+
+  // リセット（ホームのみ）
+  el("btnReset").onclick = () => {
+    if(!STORE){ return; }
+    const a = confirm("今回分をリセットします。よろしいですか？");
+    if(!a) return;
+    const b = confirm("最終確認：今回分の履歴を消します。実行しますか？");
+    if(!b) return;
+
+    // カメラが動いていたら止める
+    try{ stopCamera(); }catch(_e){}
+
     st.scanned = [];
     st.okSet.clear();
     st.ngCount = 0;
+
     el("remainCard").style.display = "none";
-    el("msg").textContent = "今回分をクリアしました";
-    renderPanels();
+    el("msg").textContent = "リセットしました";
     hideDone();
-    el("scanInput").focus();
+    renderPanels();
   };
+
+  // 未スキャン一覧
   el("btnShowRemain").onclick = () => renderRemainGrid();
 
-  // 手入力/スキャナ入力
+  // 手入力/スキャナ入力（読み取り画面のみ）
   el("scanInput").addEventListener("keydown", (e) => {
     if(e.key === "Enter"){
       e.preventDefault();
-      addScan(el("scanInput").value);
+      const v = el("scanInput").value;
+      addScan(v, { source: "manual" });
       el("scanInput").value = "";
-      el("scanInput").focus();
+      try{ el("scanInput").focus(); }catch(_e){}
     }
   });
 
   // iOSでフォーカスが外れやすい対策（軽め）
   document.addEventListener("touchstart", () => {
     const inp = el("scanInput");
-    if(document.activeElement !== inp && !camRunning) inp.focus();
+    if(document.activeElement !== inp && !camRunning && el("scanScreen").style.display !== "none"){
+      try{ inp.focus(); }catch(_e){}
+    }
   }, { passive: true });
 
-  // DATA
+  // DATAロード
   const csv = await fetch(DATA_CSV_URL, {cache:"no-store"}).then(r=>r.text());
   st.all = parseCSV(csv);
 
   STORE = ((new URLSearchParams(location.search)).get("store")||"").trim();
+
+  // 店舗未選択なら店舗選択へ
   if(!STORE){
-    renderHome();
+    renderStoreSelect();
     return;
   }
 
+  // 店舗選択済み：ホームへ
   st.rows = st.all.filter(r => String(r.store_key).trim() === STORE);
 
   // 照合Map（ゆる判定）
@@ -751,6 +818,5 @@ async function stopCamera(){
     }
   }
 
-  renderScan();
-  renderPanels();
+  goHome();
 })();
