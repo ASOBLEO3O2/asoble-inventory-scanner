@@ -18,11 +18,11 @@ const qs = new URLSearchParams(location.search);
 let STORE = (qs.get("store") || "").trim();
 
 const st = {
-  all: [],          // CSV全行
-  rows: [],         // 店舗絞り込み
-  byCode: new Map(),// code variants -> row
-  scanned: [],      // 今回のOK履歴
-  okSet: new Set(), // OK（永続化）
+  all: [],
+  rows: [],
+  byCode: new Map(),
+  scanned: [],     // OKのみ（表示用）
+  okSet: new Set(),
   ngCount: 0
 };
 
@@ -71,6 +71,14 @@ function parseCSV(t){
 }
 
 /* ========= UI helpers ========= */
+function setMode(m){
+  el("home").style.display = (m==="home") ? "" : "none";
+  el("scanner").style.display = (m==="scan") ? "" : "none";
+}
+function pct(n){
+  if(!isFinite(n)) return "0.0";
+  return (Math.round(n*10)/10).toFixed(1);
+}
 function escapeHtml(s){
   return String(s ?? "")
     .replaceAll("&","&amp;")
@@ -78,10 +86,6 @@ function escapeHtml(s){
     .replaceAll(">","&gt;")
     .replaceAll('"',"&quot;")
     .replaceAll("'","&#39;");
-}
-function pct(n){
-  if(!isFinite(n)) return "0.0";
-  return (Math.round(n*10)/10).toFixed(1);
 }
 
 // iOSは振動が弱いことがある
@@ -130,12 +134,6 @@ function flash(){
   setTimeout(()=>f.classList.remove("on"), 70);
 }
 
-/* ========= 画面切替 ========= */
-function setMode(m){
-  el("home").style.display = (m==="home") ? "" : "none";
-  el("scanner").style.display = (m==="scan") ? "" : "none";
-}
-
 /* ========= 永続化（自動保存） ========= */
 function storageKey(){
   return STORE ? `inv_scan_ok_${STORE}` : "inv_scan_ok__";
@@ -143,11 +141,10 @@ function storageKey(){
 function persist(){
   if(!STORE) return;
   try{
-    const arr = [...st.okSet.values()];
     localStorage.setItem(storageKey(), JSON.stringify({
       v: 1,
       store: STORE,
-      ok: arr,
+      ok: [...st.okSet.values()],
       ng: st.ngCount,
       saved_at: Date.now()
     }));
@@ -166,6 +163,18 @@ function restore(){
 }
 
 /* ========= バッジ/進捗 ========= */
+function showDoneIfComplete(){
+  if(!STORE) return;
+  const total = st.rows.length;
+  const done = st.okSet.size;
+  if(total > 0 && done >= total){
+    el("doneOverlay").style.display = "flex";
+    vibrateDone();
+    beep();
+  }
+}
+function hideDone(){ el("doneOverlay").style.display = "none"; }
+
 function updateBadges(){
   el("storeBadge").textContent = "store: " + (STORE || "HOME");
   el("countBadge").textContent = "rows: " + (STORE ? st.rows.length : "-");
@@ -190,36 +199,22 @@ function updateBadges(){
   el("ngBadge").textContent = `ng: ${st.ngCount}`;
   el("updatedBadge").textContent = "updated: " + String(st.rows[0]?.updated_at || st.all[0]?.updated_at || "-").slice(0,10);
 
-  el("progressText").textContent = `progress: ${done}/${total} (${pct(p)}%)`;
+  el("progressText").textContent = `progress: ${done}/${total} (${pct(p)}%)  remain:${remain}`;
   el("progressFill").style.width = `${Math.min(100, Math.max(0,p))}%`;
 }
 
-function showDoneIfComplete(){
-  if(!STORE) return;
-  const total = st.rows.length;
-  const done = st.okSet.size;
-  if(total > 0 && done >= total){
-    el("doneOverlay").style.display = "flex";
-    vibrateDone();
-    beep();
-  }
-}
-function hideDone(){
-  el("doneOverlay").style.display = "none";
-}
-
 /* ========= 描画 ========= */
-function renderHitRow(row, prefix=""){
+function renderHitRow(row){
   const codeKey = normalize(row.code);
   const done = st.okSet.has(codeKey);
   const cls = `hitRow okRow ${done ? "done" : ""}`;
   return `
     <div class="${cls}">
       <div class="meta">
-        <span class="code">${escapeHtml(prefix)}${escapeHtml(row.code)}</span>
+        <span class="code">${escapeHtml(row.code)}</span>
         <span class="tag">${done ? "済" : "未"}</span>
       </div>
-      <div class="machine">${escapeHtml(row.machine_name || "-")}</div>
+      <div class="machine">マシン: ${escapeHtml(row.machine_name || "-")}</div>
     </div>
   `;
 }
@@ -311,6 +306,7 @@ function addScan(v){
   }
 
   if(!hitRow){
+    // ❌は記録しない（カウンタのみ）
     st.ngCount++;
     persist();
     updateBadges();
@@ -343,32 +339,7 @@ function addScan(v){
   showDoneIfComplete();
 }
 
-/* ========= クリア（今回だけ） =========
-   - OKセット（永続化）は保持
-   - 履歴だけ消す
-*/
-function clearThisSession(){
-  st.scanned = [];
-  el("current").innerHTML = "";
-  el("history").innerHTML = "";
-  showToast("🧹 今回の履歴をクリア");
-}
-
-/* ========= フルリセット（店舗の進捗を消す） ========= */
-function hardReset(){
-  if(!STORE) return;
-  st.okSet.clear();
-  st.ngCount = 0;
-  st.scanned = [];
-  try{ localStorage.removeItem(storageKey()); }catch(_e){}
-  hideDone();
-  updateBadges();
-  renderPanels();
-  el("remainCard").style.display = "none";
-  showToast("🔄 進捗をリセットしました");
-}
-
-/* ========= カメラ（Quagga2 + OCR） ========= */
+/* ========= カメラ（preflight + Quagga2 + OCR） ========= */
 let camRunning = false;
 let stream = null;
 
@@ -446,6 +417,64 @@ async function toggleTorch(){
   }
 }
 
+/* ✅ preflight: まず権限を取り、UI video に stream を流す */
+async function startCameraPreflight(){
+  if(location.protocol === "file:"){
+    setCamStatus("camera: blocked (file://)");
+    showToast("file://ではカメラ不可。HTTPS or localhostで開いてください");
+    return false;
+  }
+
+  setCamStatus("camera: requesting permission...");
+
+  if(stream && stream.getTracks().some(t => t.readyState === "live")){
+    setCamStatus("camera: permission ok (cached)");
+    return true;
+  }
+
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width:  { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    });
+
+    // ✅ UIに見えるように流す（iOSも安定）
+    const v = videoEl();
+    if(v){
+      v.srcObject = stream;
+      await v.play().catch(()=>{});
+    }
+
+    setCamStatus("camera: permission ok");
+    showToast("📷 カメラ起動OK");
+    return true;
+
+  }catch(e){
+    console.error(e);
+    const name = String(e?.name || "");
+    if(name.includes("NotAllowedError")){
+      setCamStatus("camera: permission denied");
+      showToast("📷 カメラ権限が拒否されています（🔒で許可）");
+    }else if(name.includes("NotFoundError")){
+      setCamStatus("camera: no camera");
+      showToast("📷 カメラが見つかりません");
+    }else if(name.includes("NotReadableError")){
+      setCamStatus("camera: busy");
+      showToast("📷 他アプリがカメラ使用中の可能性");
+    }else{
+      setCamStatus("camera: getUserMedia error");
+      showToast("📷 カメラ起動エラー（console確認）");
+    }
+    try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch(_){}
+    stream = null;
+    return false;
+  }
+}
+
 /* OCR: 中央帯切り出し */
 function createOcrCanvasFromVideo(){
   const v = videoEl();
@@ -519,8 +548,7 @@ async function ensureOcrWorker(){
   if(ocrWorker) return;
 
   setOcrBadge(true, "OCR準備中…（初回だけ数秒）");
-
-  // Tesseract v5
+  // @ts-ignore
   ocrWorker = await Tesseract.createWorker("eng", 1, { logger: (_m)=>{} });
 
   await ocrWorker.setParameters({
@@ -577,44 +605,41 @@ function stopOcrLoop(){
   setOcrBadge(false);
 }
 
-/* ✅ Quagga2 起動/停止 */
+/* ✅ Quagga2 起動（preflight後） */
 let quaggaOnDetected = null;
 
-async function startQuagga(){
+async function startQuaggaWithStream(){
   if(!window.Quagga){
     setCamStatus("camera: Quagga NG");
     showToast("Quagga 読み込み失敗");
     return false;
   }
+  if(!stream){
+    setCamStatus("camera: no stream");
+    showToast("streamがありません（権限取得失敗）");
+    return false;
+  }
 
-  // ✅ モーダルを表示してから init（display:none のままだと失敗しがち）
-  openCamModal();
+  // display:none の状態で init すると失敗しがち
   await new Promise(r => requestAnimationFrame(r));
-  await new Promise(r => setTimeout(r, 0));
 
-  const targetEl = document.getElementById("videoWrap"); // ✅ divにする
+  const targetEl = el("videoWrap"); // ✅ divコンテナ
   if(!targetEl){
     setCamStatus("camera: target missing");
     showToast("#videoWrap が見つかりません");
     return false;
   }
 
-  setCamStatus("camera: starting...");
-
-  // target内をQuaggaに任せる（既存videoは残っててもOKだが、念のため空にする）
-  // ※ overlay等が target直下にある場合は消さないで。今回 overlay は別divなのでOK
-  // もし overlay も消えるならこの2行はコメントアウトしてください。
-  // targetEl.innerHTML = '<video id="camVideo" playsinline muted></video>';
-  // ↑ overlayと構造が崩れるならやらない
+  setCamStatus("camera: starting quagga...");
 
   const config = {
     inputStream: {
       type: "LiveStream",
-      target: targetEl, // ✅ videoではなくコンテナdiv
+      target: targetEl,
       constraints: {
         facingMode: "environment",
-        width:  { ideal: 1280 },
-        height: { ideal: 720 }
+        width: { ideal: 1280 },
+        height:{ ideal: 720 }
       }
     },
     locator: { patchSize: "medium", halfSample: true },
@@ -639,23 +664,8 @@ async function startQuagga(){
     Quagga.init(config, async (err)=>{
       if(err){
         console.error(err);
-
-        // ✅ 権限系はここに来ることが多い
-        const msg = String(err?.name || err?.message || err);
-        if(msg.includes("NotAllowedError") || msg.includes("Permission")){
-          setCamStatus("camera: permission denied");
-          showToast("📷 カメラ権限が拒否されています");
-        }else if(msg.includes("NotFoundError")){
-          setCamStatus("camera: no camera");
-          showToast("📷 カメラが見つかりません");
-        }else if(location.protocol === "file:"){
-          setCamStatus("camera: blocked (file://)");
-          showToast("file:// ではカメラ起動できません（HTTPS/localhostで）");
-        }else{
-          setCamStatus("camera: init error");
-          showToast("camera init error（console見て）");
-        }
-
+        setCamStatus("camera: quagga init error");
+        showToast("Quagga init error（console確認）");
         resolve(false);
         return;
       }
@@ -664,7 +674,7 @@ async function startQuagga(){
       camRunning = true;
       setCamStatus("camera: running");
 
-      // ✅ QuaggaのTrack取得（ズーム/トーチ用）
+      // Quagga側trackが取れれば更新（ズーム/トーチ用）
       try{
         const ca = Quagga?.CameraAccess;
         if(ca?.getActiveTrack){
@@ -674,60 +684,9 @@ async function startQuagga(){
       }catch(_e){}
 
       await applyZoomFromUI();
+
+      // OCR併用
       startOcrLoop();
-
-      // onDetected（既存のロジックがある前提）
-      if(quaggaOnDetected) Quagga.offDetected(quaggaOnDetected);
-      quaggaOnDetected = (res)=>{
-        const now = Date.now();
-        if(now - lastAnyTs < ANY_CODE_COOLDOWN_MS) return;
-
-        const code = res?.codeResult?.code || "";
-        const txt = normalize(code);
-        if(!txt) return;
-
-        if(txt === lastText && (now - lastTextTs) < SAME_CODE_COOLDOWN_MS) return;
-
-        lastAnyTs = now;
-        lastText = txt;
-        lastTextTs = now;
-
-        addScan(code);
-      };
-      Quagga.onDetected(quaggaOnDetected);
-
-      resolve(true);
-    });
-  });
-}
-
-  return new Promise((resolve)=>{
-    Quagga.init(config, async (err)=>{
-      if(err){
-        console.error(err);
-        setCamStatus("camera: init error");
-        resolve(false);
-        return;
-      }
-
-      Quagga.start();
-      camRunning = true;
-
-      // QuaggaのアクティブTrack取得（ズーム/トーチ用）
-      try{
-        const ca = Quagga?.CameraAccess;
-        if(ca && ca.getActiveTrack){
-          const track = ca.getActiveTrack();
-          if(track){
-            stream = new MediaStream([track]);
-          }
-        }
-      }catch(_e){}
-
-      setCamStatus("camera: running");
-
-      // UIのズーム反映（対応端末のみ）
-      await applyZoomFromUI();
 
       // onDetected
       if(quaggaOnDetected) Quagga.offDetected(quaggaOnDetected);
@@ -750,10 +709,6 @@ async function startQuagga(){
       };
 
       Quagga.onDetected(quaggaOnDetected);
-
-      // OCR併用
-      startOcrLoop();
-
       resolve(true);
     });
   });
@@ -773,12 +728,12 @@ async function stopQuagga(){
     }
   }catch(_e){}
 
-  try{
-    if(stream){
-      stream.getTracks().forEach(t=>t.stop());
-    }
-  }catch(_e){}
+  // preflightで取った stream を必ず止める
+  try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch(_e){}
   stream = null;
+
+  // UI video もクリア
+  try{ const v = videoEl(); if(v) v.srcObject = null; }catch(_e){}
 
   setCamStatus("camera: stopped");
 }
@@ -812,7 +767,6 @@ async function loadCsv(){
   const text = await res.text();
   st.all = parseCSV(text);
 
-  // 全体 index（variants -> row）
   st.byCode.clear();
   for(const r of st.all){
     const vars = codeVariants(r.code);
@@ -828,7 +782,7 @@ async function loadCsv(){
   }
 }
 
-/* ========= ボタン/UIバインド ========= */
+/* ========= UIバインド ========= */
 function bindUi(){
   el("btnHome").addEventListener("click", ()=>{
     // HOMEに戻る（storeクエリを外す）
@@ -837,7 +791,10 @@ function bindUi(){
 
   el("btnClear").addEventListener("click", ()=>{
     // 「今回だけ」クリア（履歴だけ消す）
-    clearThisSession();
+    st.scanned = [];
+    el("current").innerHTML = "";
+    el("history").innerHTML = "";
+    showToast("🧹 今回の履歴をクリア");
   });
 
   el("btnShowRemain").addEventListener("click", ()=>{
@@ -850,7 +807,9 @@ function bindUi(){
 
   el("btnCamera").addEventListener("click", async ()=>{
     openCamModal();
-    await startQuagga();
+    const ok = await startCameraPreflight();
+    if(!ok) return;
+    await startQuaggaWithStream();
   });
 
   el("camClose").addEventListener("click", async ()=>{
@@ -863,18 +822,7 @@ function bindUi(){
 
   el("btnDoneClose").addEventListener("click", hideDone);
 
-  // モーダル背景クリックで閉じたい場合はここ（今は誤タップ防止でOFF）
-  // el("camModal").addEventListener("click", async (e)=>{
-  //   if(e.target === el("camModal")){
-  //     await stopQuagga();
-  //     closeCamModal();
-  //   }
-  // });
-
   wireScanInput();
-
-  // 🔥 デバッグ用：進捗全消し（必要なら使う）
-  // window.__HARD_RESET__ = hardReset;
 }
 
 /* ========= 起動 ========= */
