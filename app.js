@@ -3,12 +3,12 @@ const DATA_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
 // 連続検出の誤連打抑制（元の仕様に戻す）
-const SAME_CODE_COOLDOWN_MS = 900;   // 同一コードは0.9秒は無視
-const ANY_CODE_COOLDOWN_MS  = 180;   // 全体も少し抑制
+const SAME_CODE_COOLDOWN_MS = 300;   // 同一コードは0.9秒は無視
+const ANY_CODE_COOLDOWN_MS  = 80;   // 全体も少し抑制
 
 // OCRの頻度（バーコードが来ない時だけ動かす）
 const OCR_INTERVAL_MS = 700;         // 0.7秒毎
-const OCR_MIN_GAP_AFTER_HIT_MS = 1200; // 直近でHITしたらOCRしない
+const OCR_MIN_GAP_AFTER_HIT_MS = 600; // 直近でHITしたらOCRしない
 
 /* ========= 状態 ========= */
 const el = (id) => document.getElementById(id);
