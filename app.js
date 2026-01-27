@@ -583,19 +583,38 @@ let quaggaOnDetected = null;
 async function startQuagga(){
   if(!window.Quagga){
     setCamStatus("camera: Quagga NG");
+    showToast("Quagga 読み込み失敗");
+    return false;
+  }
+
+  // ✅ モーダルを表示してから init（display:none のままだと失敗しがち）
+  openCamModal();
+  await new Promise(r => requestAnimationFrame(r));
+  await new Promise(r => setTimeout(r, 0));
+
+  const targetEl = document.getElementById("videoWrap"); // ✅ divにする
+  if(!targetEl){
+    setCamStatus("camera: target missing");
+    showToast("#videoWrap が見つかりません");
     return false;
   }
 
   setCamStatus("camera: starting...");
 
+  // target内をQuaggaに任せる（既存videoは残っててもOKだが、念のため空にする）
+  // ※ overlay等が target直下にある場合は消さないで。今回 overlay は別divなのでOK
+  // もし overlay も消えるならこの2行はコメントアウトしてください。
+  // targetEl.innerHTML = '<video id="camVideo" playsinline muted></video>';
+  // ↑ overlayと構造が崩れるならやらない
+
   const config = {
     inputStream: {
       type: "LiveStream",
-      target: videoEl(),
+      target: targetEl, // ✅ videoではなくコンテナdiv
       constraints: {
         facingMode: "environment",
-        width:  { min: 640, ideal: 1280 },
-        height: { min: 480, ideal: 720 },
+        width:  { ideal: 1280 },
+        height: { ideal: 720 }
       }
     },
     locator: { patchSize: "medium", halfSample: true },
@@ -615,6 +634,72 @@ async function startQuagga(){
     },
     locate: true
   };
+
+  return new Promise((resolve)=>{
+    Quagga.init(config, async (err)=>{
+      if(err){
+        console.error(err);
+
+        // ✅ 権限系はここに来ることが多い
+        const msg = String(err?.name || err?.message || err);
+        if(msg.includes("NotAllowedError") || msg.includes("Permission")){
+          setCamStatus("camera: permission denied");
+          showToast("📷 カメラ権限が拒否されています");
+        }else if(msg.includes("NotFoundError")){
+          setCamStatus("camera: no camera");
+          showToast("📷 カメラが見つかりません");
+        }else if(location.protocol === "file:"){
+          setCamStatus("camera: blocked (file://)");
+          showToast("file:// ではカメラ起動できません（HTTPS/localhostで）");
+        }else{
+          setCamStatus("camera: init error");
+          showToast("camera init error（console見て）");
+        }
+
+        resolve(false);
+        return;
+      }
+
+      Quagga.start();
+      camRunning = true;
+      setCamStatus("camera: running");
+
+      // ✅ QuaggaのTrack取得（ズーム/トーチ用）
+      try{
+        const ca = Quagga?.CameraAccess;
+        if(ca?.getActiveTrack){
+          const track = ca.getActiveTrack();
+          if(track) stream = new MediaStream([track]);
+        }
+      }catch(_e){}
+
+      await applyZoomFromUI();
+      startOcrLoop();
+
+      // onDetected（既存のロジックがある前提）
+      if(quaggaOnDetected) Quagga.offDetected(quaggaOnDetected);
+      quaggaOnDetected = (res)=>{
+        const now = Date.now();
+        if(now - lastAnyTs < ANY_CODE_COOLDOWN_MS) return;
+
+        const code = res?.codeResult?.code || "";
+        const txt = normalize(code);
+        if(!txt) return;
+
+        if(txt === lastText && (now - lastTextTs) < SAME_CODE_COOLDOWN_MS) return;
+
+        lastAnyTs = now;
+        lastText = txt;
+        lastTextTs = now;
+
+        addScan(code);
+      };
+      Quagga.onDetected(quaggaOnDetected);
+
+      resolve(true);
+    });
+  });
+}
 
   return new Promise((resolve)=>{
     Quagga.init(config, async (err)=>{
