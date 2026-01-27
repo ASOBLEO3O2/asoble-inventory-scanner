@@ -1,14 +1,16 @@
+// app.js
+
 /* ========= 設定 ========= */
 const DATA_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
 // 連続検出の誤連打抑制
-const SAME_CODE_COOLDOWN_MS = 650;   // ✅ Quaggaは連続ヒットしやすいので少し短め推奨（900→650）
-const ANY_CODE_COOLDOWN_MS  = 90;    // ✅ 一瞬のヒットを拾う（180→90）
+const SAME_CODE_COOLDOWN_MS = 650;
+const ANY_CODE_COOLDOWN_MS  = 90;
 
 // OCRの頻度（バーコードが来ない時だけ動かす）
-const OCR_INTERVAL_MS = 700;         
-const OCR_MIN_GAP_AFTER_HIT_MS = 900; // ✅ 1200→900（番号フォールバックを殺しすぎない）
+const OCR_INTERVAL_MS = 700;
+const OCR_MIN_GAP_AFTER_HIT_MS = 900;
 
 /* ========= 状態 ========= */
 const el = (id) => document.getElementById(id);
@@ -16,12 +18,12 @@ const qs = new URLSearchParams(location.search);
 let STORE = (qs.get("store") || "").trim();
 
 const st = {
-  all: [],
-  rows: [],
-  byCode: new Map(),
-  scanned: [],     // OKのみ保存
-  okSet: new Set(),
-  ngCount: 0       // ❌はカウントのみ
+  all: [],          // CSV全行
+  rows: [],         // 店舗絞り込み
+  byCode: new Map(),// code variants -> row
+  scanned: [],      // 今回のOK履歴
+  okSet: new Set(), // OK（永続化）
+  ngCount: 0
 };
 
 /* ========= 正規化 ========= */
@@ -69,14 +71,6 @@ function parseCSV(t){
 }
 
 /* ========= UI helpers ========= */
-function setMode(m){
-  el("home").style.display = (m==="home") ? "" : "none";
-  el("scanner").style.display = (m==="scan") ? "" : "none";
-}
-function pct(n){
-  if(!isFinite(n)) return "0.0";
-  return (Math.round(n*10)/10).toFixed(1);
-}
 function escapeHtml(s){
   return String(s ?? "")
     .replaceAll("&","&amp;")
@@ -84,6 +78,10 @@ function escapeHtml(s){
     .replaceAll(">","&gt;")
     .replaceAll('"',"&quot;")
     .replaceAll("'","&#39;");
+}
+function pct(n){
+  if(!isFinite(n)) return "0.0";
+  return (Math.round(n*10)/10).toFixed(1);
 }
 
 // iOSは振動が弱いことがある
@@ -132,19 +130,42 @@ function flash(){
   setTimeout(()=>f.classList.remove("on"), 70);
 }
 
-/* ========= バッジ/進捗 ========= */
-function showDoneIfComplete(){
-  if(!STORE) return;
-  const total = st.rows.length;
-  const done = st.okSet.size;
-  if(total > 0 && done >= total){
-    el("doneOverlay").style.display = "flex";
-    vibrateDone();
-    beep();
-  }
+/* ========= 画面切替 ========= */
+function setMode(m){
+  el("home").style.display = (m==="home") ? "" : "none";
+  el("scanner").style.display = (m==="scan") ? "" : "none";
 }
-function hideDone(){ el("doneOverlay").style.display = "none"; }
 
+/* ========= 永続化（自動保存） ========= */
+function storageKey(){
+  return STORE ? `inv_scan_ok_${STORE}` : "inv_scan_ok__";
+}
+function persist(){
+  if(!STORE) return;
+  try{
+    const arr = [...st.okSet.values()];
+    localStorage.setItem(storageKey(), JSON.stringify({
+      v: 1,
+      store: STORE,
+      ok: arr,
+      ng: st.ngCount,
+      saved_at: Date.now()
+    }));
+  }catch(_e){}
+}
+function restore(){
+  if(!STORE) return;
+  try{
+    const raw = localStorage.getItem(storageKey());
+    if(!raw) return;
+    const obj = JSON.parse(raw);
+    const ok = Array.isArray(obj?.ok) ? obj.ok : [];
+    st.okSet = new Set(ok.map(normalize));
+    st.ngCount = Number(obj?.ng || 0);
+  }catch(_e){}
+}
+
+/* ========= バッジ/進捗 ========= */
 function updateBadges(){
   el("storeBadge").textContent = "store: " + (STORE || "HOME");
   el("countBadge").textContent = "rows: " + (STORE ? st.rows.length : "-");
@@ -169,22 +190,36 @@ function updateBadges(){
   el("ngBadge").textContent = `ng: ${st.ngCount}`;
   el("updatedBadge").textContent = "updated: " + String(st.rows[0]?.updated_at || st.all[0]?.updated_at || "-").slice(0,10);
 
-  el("progressText").textContent = `progress: ${done}/${total} (${pct(p)}%)  remain:${remain}`;
+  el("progressText").textContent = `progress: ${done}/${total} (${pct(p)}%)`;
   el("progressFill").style.width = `${Math.min(100, Math.max(0,p))}%`;
 }
 
+function showDoneIfComplete(){
+  if(!STORE) return;
+  const total = st.rows.length;
+  const done = st.okSet.size;
+  if(total > 0 && done >= total){
+    el("doneOverlay").style.display = "flex";
+    vibrateDone();
+    beep();
+  }
+}
+function hideDone(){
+  el("doneOverlay").style.display = "none";
+}
+
 /* ========= 描画 ========= */
-function renderHitRow(row){
+function renderHitRow(row, prefix=""){
   const codeKey = normalize(row.code);
   const done = st.okSet.has(codeKey);
   const cls = `hitRow okRow ${done ? "done" : ""}`;
   return `
     <div class="${cls}">
       <div class="meta">
-        <span class="code">${escapeHtml(row.code)}</span>
+        <span class="code">${escapeHtml(prefix)}${escapeHtml(row.code)}</span>
         <span class="tag">${done ? "済" : "未"}</span>
       </div>
-      <div class="machine">マシン: ${escapeHtml(row.machine_name || "-")}</div>
+      <div class="machine">${escapeHtml(row.machine_name || "-")}</div>
     </div>
   `;
 }
@@ -222,11 +257,7 @@ function renderPanels(){
   updateBadges();
 
   const last = st.scanned[0];
-  if(!last){
-    el("current").innerHTML = "";
-  }else{
-    el("current").innerHTML = renderHitRow(last.row);
-  }
+  el("current").innerHTML = last ? renderHitRow(last.row) : "";
 
   el("history").innerHTML = st.scanned.slice(0, 60).map(x=>{
     const key = normalize(x.row.code);
@@ -280,8 +311,8 @@ function addScan(v){
   }
 
   if(!hitRow){
-    // ❌は記録しない（カウンタのみ）
     st.ngCount++;
+    persist();
     updateBadges();
     showToast("❌ 一致なし");
     el("msg").textContent = "一致なし（リストにありません）";
@@ -307,8 +338,34 @@ function addScan(v){
   st.scanned.unshift({ row: hitRow, ok: true, ts: Date.now() });
   el("msg").textContent = "一致しました（連続スキャン中）";
 
+  persist();
   renderPanels();
   showDoneIfComplete();
+}
+
+/* ========= クリア（今回だけ） =========
+   - OKセット（永続化）は保持
+   - 履歴だけ消す
+*/
+function clearThisSession(){
+  st.scanned = [];
+  el("current").innerHTML = "";
+  el("history").innerHTML = "";
+  showToast("🧹 今回の履歴をクリア");
+}
+
+/* ========= フルリセット（店舗の進捗を消す） ========= */
+function hardReset(){
+  if(!STORE) return;
+  st.okSet.clear();
+  st.ngCount = 0;
+  st.scanned = [];
+  try{ localStorage.removeItem(storageKey()); }catch(_e){}
+  hideDone();
+  updateBadges();
+  renderPanels();
+  el("remainCard").style.display = "none";
+  showToast("🔄 進捗をリセットしました");
 }
 
 /* ========= カメラ（Quagga2 + OCR） ========= */
@@ -463,7 +520,7 @@ async function ensureOcrWorker(){
 
   setOcrBadge(true, "OCR準備中…（初回だけ数秒）");
 
-  // @ts-ignore
+  // Tesseract v5
   ocrWorker = await Tesseract.createWorker("eng", 1, { logger: (_m)=>{} });
 
   await ocrWorker.setParameters({
@@ -525,13 +582,238 @@ let quaggaOnDetected = null;
 
 async function startQuagga(){
   if(!window.Quagga){
-    setCamStatus("Quagga: NG（ライブラリ読込失敗）");
+    setCamStatus("camera: Quagga NG");
     return false;
   }
 
-  // Quaggaは内部で getUserMedia を持つので、ここでは stream を取得して videoに付けるのは「UI用」
-  // （Quagga側のカメラと二重にならないよう、UI用streamは QuaggaのgetUserMedia結果を拾う）
-  // → Quagga2は init/start で内部的にストリームを持つので、start後に video要素へ流すのは控えめにします。
-  // ただし「ズーム/トーチ」にはトラックが必要なので、Quaggaが使うstreamを後で拾います。
+  setCamStatus("camera: starting...");
 
-  setCamStatus("camera: starting...
+  const config = {
+    inputStream: {
+      type: "LiveStream",
+      target: videoEl(),
+      constraints: {
+        facingMode: "environment",
+        width:  { min: 640, ideal: 1280 },
+        height: { min: 480, ideal: 720 },
+      }
+    },
+    locator: { patchSize: "medium", halfSample: true },
+    numOfWorkers: navigator.hardwareConcurrency ? Math.max(2, Math.min(6, navigator.hardwareConcurrency - 1)) : 4,
+    frequency: 8,
+    decoder: {
+      readers: [
+        "code_128_reader",
+        "ean_reader",
+        "ean_8_reader",
+        "upc_reader",
+        "upc_e_reader",
+        "code_39_reader",
+        "codabar_reader",
+        "i2of5_reader",
+      ]
+    },
+    locate: true
+  };
+
+  return new Promise((resolve)=>{
+    Quagga.init(config, async (err)=>{
+      if(err){
+        console.error(err);
+        setCamStatus("camera: init error");
+        resolve(false);
+        return;
+      }
+
+      Quagga.start();
+      camRunning = true;
+
+      // QuaggaのアクティブTrack取得（ズーム/トーチ用）
+      try{
+        const ca = Quagga?.CameraAccess;
+        if(ca && ca.getActiveTrack){
+          const track = ca.getActiveTrack();
+          if(track){
+            stream = new MediaStream([track]);
+          }
+        }
+      }catch(_e){}
+
+      setCamStatus("camera: running");
+
+      // UIのズーム反映（対応端末のみ）
+      await applyZoomFromUI();
+
+      // onDetected
+      if(quaggaOnDetected) Quagga.offDetected(quaggaOnDetected);
+
+      quaggaOnDetected = (res)=>{
+        const now = Date.now();
+        if(now - lastAnyTs < ANY_CODE_COOLDOWN_MS) return;
+
+        const code = res?.codeResult?.code || "";
+        const txt = normalize(code);
+        if(!txt) return;
+
+        if(txt === lastText && (now - lastTextTs) < SAME_CODE_COOLDOWN_MS) return;
+
+        lastAnyTs = now;
+        lastText = txt;
+        lastTextTs = now;
+
+        addScan(code);
+      };
+
+      Quagga.onDetected(quaggaOnDetected);
+
+      // OCR併用
+      startOcrLoop();
+
+      resolve(true);
+    });
+  });
+}
+
+async function stopQuagga(){
+  try{
+    stopOcrLoop();
+    camRunning = false;
+
+    if(window.Quagga){
+      if(quaggaOnDetected){
+        Quagga.offDetected(quaggaOnDetected);
+        quaggaOnDetected = null;
+      }
+      await new Promise((r)=>Quagga.stop(()=>r()));
+    }
+  }catch(_e){}
+
+  try{
+    if(stream){
+      stream.getTracks().forEach(t=>t.stop());
+    }
+  }catch(_e){}
+  stream = null;
+
+  setCamStatus("camera: stopped");
+}
+
+/* ========= 入力欄（物理スキャナ） ========= */
+let inputBufTimer = null;
+function wireScanInput(){
+  const inp = el("scanInput");
+  inp.addEventListener("input", ()=>{
+    clearTimeout(inputBufTimer);
+    inputBufTimer = setTimeout(()=>{
+      const v = inp.value;
+      inp.value = "";
+      addScan(v);
+    }, 30);
+  });
+
+  inp.addEventListener("keydown", (e)=>{
+    if(e.key === "Enter"){
+      e.preventDefault();
+      const v = inp.value;
+      inp.value = "";
+      addScan(v);
+    }
+  });
+}
+
+/* ========= データ読込 ========= */
+async function loadCsv(){
+  const res = await fetch(DATA_CSV_URL, { cache:"no-store" });
+  const text = await res.text();
+  st.all = parseCSV(text);
+
+  // 全体 index（variants -> row）
+  st.byCode.clear();
+  for(const r of st.all){
+    const vars = codeVariants(r.code);
+    for(const v of vars){
+      if(!st.byCode.has(v)) st.byCode.set(v, r);
+    }
+  }
+
+  if(STORE){
+    st.rows = st.all.filter(r => String(r.store_key||"").trim() === STORE);
+  }else{
+    st.rows = [];
+  }
+}
+
+/* ========= ボタン/UIバインド ========= */
+function bindUi(){
+  el("btnHome").addEventListener("click", ()=>{
+    // HOMEに戻る（storeクエリを外す）
+    location.href = location.pathname;
+  });
+
+  el("btnClear").addEventListener("click", ()=>{
+    // 「今回だけ」クリア（履歴だけ消す）
+    clearThisSession();
+  });
+
+  el("btnShowRemain").addEventListener("click", ()=>{
+    if(el("remainCard").style.display === "none" || !el("remainCard").style.display){
+      renderRemainGrid();
+    }else{
+      el("remainCard").style.display = "none";
+    }
+  });
+
+  el("btnCamera").addEventListener("click", async ()=>{
+    openCamModal();
+    await startQuagga();
+  });
+
+  el("camClose").addEventListener("click", async ()=>{
+    await stopQuagga();
+    closeCamModal();
+  });
+
+  el("btnTorch").addEventListener("click", toggleTorch);
+  el("zoomRange").addEventListener("input", applyZoomFromUI);
+
+  el("btnDoneClose").addEventListener("click", hideDone);
+
+  // モーダル背景クリックで閉じたい場合はここ（今は誤タップ防止でOFF）
+  // el("camModal").addEventListener("click", async (e)=>{
+  //   if(e.target === el("camModal")){
+  //     await stopQuagga();
+  //     closeCamModal();
+  //   }
+  // });
+
+  wireScanInput();
+
+  // 🔥 デバッグ用：進捗全消し（必要なら使う）
+  // window.__HARD_RESET__ = hardReset;
+}
+
+/* ========= 起動 ========= */
+async function boot(){
+  bindUi();
+
+  try{
+    await loadCsv();
+  }catch(e){
+    console.error(e);
+    showToast("CSV読込に失敗");
+    el("title").textContent = "棚卸スキャナ（エラー）";
+    return;
+  }
+
+  if(!STORE){
+    renderHome();
+    return;
+  }
+
+  restore();
+  renderScan();
+  renderPanels();
+  showDoneIfComplete();
+}
+
+boot();
