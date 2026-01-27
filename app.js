@@ -2,12 +2,8 @@
 const DATA_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
-/** 仕様確定：2回一致で確定 + 成功後1秒停止 */
-const CONFIRM_HITS = 2;
-const CONFIRM_COOLDOWN_MS = 1000;
-
-/** 連続検出の誤連打抑制（既存） */
-const SAME_CODE_COOLDOWN_MS = 900;   // 同一コードは0.9秒は無視（確定前段の抑制）
+// 連続検出の誤連打抑制（元の仕様に戻す）
+const SAME_CODE_COOLDOWN_MS = 900;   // 同一コードは0.9秒は無視
 const ANY_CODE_COOLDOWN_MS  = 180;   // 全体も少し抑制
 
 // OCRの頻度（バーコードが来ない時だけ動かす）
@@ -24,12 +20,12 @@ const st = {
   rows: [],
   byCode: new Map(),
 
-  // 履歴（OK/DUPのみ保存）
+  // OK/DUPのみ保存
   scanned: [], // { row, ts, dup:boolean }
   okSet: new Set(),
 
-  // INVALIDは記録しない：カウンタのみ
-  ngCount: 0,
+  // INVALIDは記録しない（カウンタのみ）
+  ngCount: 0
 };
 
 /* ========= 正規化 ========= */
@@ -78,14 +74,10 @@ function parseCSV(t){
 
 /* ========= UI helpers ========= */
 function setMode(m){
-  // 店舗選択
   el("storeSelect").style.display = (m==="store") ? "" : "none";
-  // 状況確認ホーム
-  el("homeStatus").style.display  = (m==="home") ? "" : "none";
-  // 読み取り画面
-  el("scanScreen").style.display  = (m==="scan") ? "" : "none";
+  el("homeStatus").style.display  = (m==="home")  ? "" : "none";
+  el("scanScreen").style.display  = (m==="scan")  ? "" : "none";
 }
-
 function pct(n){
   if(!isFinite(n)) return "0.0";
   return (Math.round(n*10)/10).toFixed(1);
@@ -99,7 +91,6 @@ function escapeHtml(s){
     .replaceAll("'","&#39;");
 }
 
-// iOSは振動がほぼ無理（Chromeでも中身WebKit）→ 代替の音/フラッシュを強める
 function vibrateOk(){
   try{ if(navigator.vibrate) navigator.vibrate([60,30,60]); }catch(_e){}
 }
@@ -110,7 +101,6 @@ function vibrateDone(){
   try{ if(navigator.vibrate) navigator.vibrate([120,60,120,60,220]); }catch(_e){}
 }
 
-// 成功時：音（iOSでも鳴りやすいよう、最初のユーザー操作後に使う）
 let audioCtx = null;
 function beep(){
   try{
@@ -235,11 +225,7 @@ function renderHomeStatus(){
   updateBadges();
 
   const last = st.scanned[0];
-  if(!last){
-    el("current").innerHTML = "";
-  }else{
-    el("current").innerHTML = renderHitRow(last.row, { dup: last.dup });
-  }
+  el("current").innerHTML = last ? renderHitRow(last.row, { dup: last.dup }) : "";
 
   el("history").innerHTML = st.scanned.slice(0, 60).map(x=>{
     return renderHitRow(x.row, { dup: x.dup });
@@ -281,10 +267,15 @@ function renderRemainGrid(){
   el("remainCard").scrollIntoView({ behavior:"smooth", block:"start" });
 }
 
-/* ========= スキャン確定（OK/DUPのみ保存、INVALIDは記録しない） ========= */
-function commitScanByText(v){
+/* ========= スキャン確定（元仕様：1回で確定） ========= */
+let lastAnyTs = 0;
+let lastText = "";
+let lastTextTs = 0;
+let lastHitTs = 0;
+
+function addScan(v){
   const variants = codeVariants(v);
-  if(!variants.length) return false;
+  if(!variants.length) return;
 
   let hitRow = null;
   let hitKey = null;
@@ -303,12 +294,12 @@ function commitScanByText(v){
     st.ngCount++;
     updateBadges();
     showToast("❌ 一致なし");
-    const msg = el("msg"); if(msg) msg.textContent = "一致なし（リストにありません）";
-    return false;
+    el("msg").textContent = "一致なし（リストにありません）";
+    return;
   }
 
-  // OK/DUP
   const already = st.okSet.has(hitKey);
+
   if(!already){
     st.okSet.add(hitKey);
     vibrateOk(); beep(); flash();
@@ -320,48 +311,14 @@ function commitScanByText(v){
   }
 
   st.scanned.unshift({ row: hitRow, dup: already, ts: Date.now() });
+  el("msg").textContent = already ? "重複スキャン（注意）" : "一致しました（連続スキャン中）";
 
-  updateBadges();
-  renderHomeStatus();  // 履歴はホーム側で見せる（状態反映）
+  // 画面反映
+  renderHomeStatus();
   showDoneIfComplete();
-  return true;
-}
 
-/* ========= 2回一致 + 成功後停止（確定ゲート） ========= */
-let confirmCandidate = "";
-let confirmCount = 0;
-let confirmLastTs = 0;
-let confirmCooldownUntil = 0;
-
-function handleDetectedText(rawText){
-  const now = Date.now();
-
-  // 成功後停止（1秒）
-  if(now < confirmCooldownUntil) return;
-
-  const n = normalize(rawText);
-  if(!n) return;
-
-  // 既存の軽い抑制（ノイズ減）
-  if(now - confirmLastTs < ANY_CODE_COOLDOWN_MS) return;
-
-  // 候補更新
-  if(n === confirmCandidate && (now - confirmLastTs) < SAME_CODE_COOLDOWN_MS){
-    confirmCount++;
-  }else{
-    confirmCandidate = n;
-    confirmCount = 1;
-  }
-
-  confirmLastTs = now;
-
-  // 確定条件：連続2回一致
-  if(confirmCount >= CONFIRM_HITS){
-    confirmCount = 0;
-    confirmCandidate = "";
-    confirmCooldownUntil = now + CONFIRM_COOLDOWN_MS;
-    commitScanByText(rawText);
-  }
+  // OCR抑制用
+  lastHitTs = Date.now();
 }
 
 /* ========= カメラ（ZXing + OCR） ========= */
@@ -440,7 +397,7 @@ async function toggleTorch(){
   }
 }
 
-/* OCR: 画面中央の帯だけ切り出して候補を拾う */
+/* OCR: 画面中央の“帯”だけ切り出して候補を拾う */
 function createOcrCanvasFromVideo(){
   const v = videoEl();
   const vw = v.videoWidth || 0;
@@ -500,8 +457,7 @@ function tryHitByCandidates(cands){
     for(const v of vars){
       const row = st.byCode.get(v);
       if(row){
-        // OCRでも同じ確定ゲートを通す（2回一致）
-        handleDetectedText(row.code);
+        addScan(row.code); // 正規のcodeで確定
         return true;
       }
     }
@@ -509,7 +465,7 @@ function tryHitByCandidates(cands){
   return false;
 }
 
-/* OCRワーカー起動 */
+/* OCRワーカーを起動 */
 async function ensureOcrWorker(){
   if(ocrWorker) return;
 
@@ -536,8 +492,7 @@ function startOcrLoop(){
     if(ocrBusy) return;
 
     const now = Date.now();
-    if(now < confirmCooldownUntil) return;
-    if(now - confirmLastTs < OCR_MIN_GAP_AFTER_HIT_MS) return;
+    if(now - lastHitTs < OCR_MIN_GAP_AFTER_HIT_MS) return;
 
     const v = videoEl();
     if(!v || !v.videoWidth) return;
@@ -557,10 +512,7 @@ function startOcrLoop(){
       const cands = extractCandidatesFromText(text);
       if(cands.length){
         const hit = tryHitByCandidates(cands);
-        if(hit){
-          // ヒット時は confirmLastTs を更新してOCRの連打を抑える
-          confirmLastTs = Date.now();
-        }
+        if(hit) lastHitTs = Date.now();
       }
     }catch(_e){
       // OCRは落ちても運用継続
@@ -579,7 +531,7 @@ function stopOcrLoop(){
   setOcrBadge(false);
 }
 
-/* ZXing：連続読取 */
+/* ZXing：連続読取（元仕様の抑制に戻す） */
 function startZxingLoop(){
   if(!window.ZXingBrowser){
     setCamStatus("ZXing: NG（ライブラリ読込失敗）");
@@ -591,11 +543,26 @@ function startZxingLoop(){
 
   // @ts-ignore
   const controls = zxingReader.decodeFromVideoElement(videoEl(), (result, err) => {
+    const now = Date.now();
+
+    // 全体抑制
+    if(now - lastAnyTs < ANY_CODE_COOLDOWN_MS) return;
+
     if(result && result.getText){
       const text = result.getText();
-      handleDetectedText(text);
+      const n = normalize(text);
+      if(!n) return;
+
+      // 同一コード連続抑制
+      if(n === lastText && (now - lastTextTs) < SAME_CODE_COOLDOWN_MS) return;
+
+      lastAnyTs = now;
+      lastText = n;
+      lastTextTs = now;
+
+      addScan(text);
+      lastHitTs = Date.now();
     }
-    // err は無視（NotFoundなど常時出る）
   });
 
   zxingStopFn = () => {
@@ -618,7 +585,6 @@ async function startCamera(){
     if(audioCtx.state === "suspended") await audioCtx.resume();
   }catch(_e){}
 
-  // getUserMedia
   try{
     stream = await navigator.mediaDevices.getUserMedia({
       video: {
@@ -634,20 +600,14 @@ async function startCamera(){
     return;
   }
 
-  // video attach
   const v = videoEl();
   v.srcObject = stream;
   try{ await v.play(); }catch(_e){}
 
   camRunning = true;
 
-  // 初期ズーム適用
   await applyZoomFromUI();
-
-  // ZXing開始
   startZxingLoop();
-
-  // OCR開始
   startOcrLoop();
 }
 
@@ -660,7 +620,6 @@ async function stopCamera(){
 
   camRunning = false;
 
-  // stop loops
   stopOcrLoop();
   if(zxingStopFn){
     try{ zxingStopFn(); }catch(_e){}
@@ -671,15 +630,12 @@ async function stopCamera(){
   }catch(_e){}
   zxingReader = null;
 
-  // stop stream
   try{
     stream?.getTracks?.().forEach(t => t.stop());
   }catch(_e){}
   stream = null;
 
   closeCamModal();
-
-  // 読み取り画面に戻ったら入力にフォーカス（任意）
   try{ el("scanInput").focus(); }catch(_e){}
 }
 
@@ -730,20 +686,14 @@ async function stopCamera(){
   // 未スキャン一覧（ホーム）
   el("btnShowRemainHome").onclick = () => renderRemainGrid();
 
-  // 手入力/スキャナ入力（ENTERで確定）
-  // ※ここは運用上ほぼ確実なので「即確定」扱いにしています（2回一致不要）
+  // 手入力/スキャナ入力（ENTERで確定：即 addScan）
   el("scanInput").addEventListener("keydown", (e) => {
     if(e.key === "Enter"){
       e.preventDefault();
       const v = el("scanInput").value;
       el("scanInput").value = "";
       el("scanInput").focus();
-
-      // ここは即確定（ただし成功後停止は効かせる）
-      const now = Date.now();
-      if(now < confirmCooldownUntil) return;
-      confirmCooldownUntil = now + CONFIRM_COOLDOWN_MS;
-      commitScanByText(v);
+      addScan(v);
     }
   });
 
