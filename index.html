@@ -37,7 +37,16 @@
     <div id="scanner" style="display:none">
       <div class="card">
         <button id="btnHome" class="secondary">店舗一覧</button>
-        <button id="btnClear" class="secondary">今回をクリア</button>
+
+        <!-- ✅ 追加：取得済み一覧（OK一覧） -->
+        <button id="btnShowOk" class="secondary">取得済み一覧</button>
+
+        <!-- ✅ 既存：今回だけ（履歴だけ） -->
+        <button id="btnClear" class="secondary">今回（履歴）をクリア</button>
+
+        <!-- ✅ 追加：進捗リセット（OK/NG/保存も消す） -->
+        <button id="btnResetProgress" class="secondary">進捗リセット</button>
+
         <button id="btnShowRemain" class="secondary">未スキャン一覧</button>
       </div>
 
@@ -51,17 +60,22 @@
 
         <div class="progressWrap">
           <div class="muted small" id="progressText">progress: -</div>
-          <div class="progressBar">
-            <div class="progressFill" id="progressFill"></div>
-          </div>
+          <div class="progressBar"><div class="progressFill" id="progressFill"></div></div>
         </div>
 
         <input id="scanInput" placeholder="ここにフォーカス → スキャン…" autocomplete="off" />
         <div id="msg" class="muted"></div>
       </div>
 
+      <!-- ✅ 追加：取得済み一覧 -->
+      <div class="card" id="okCard" style="display:none">
+        <strong>取得済み一覧（この店舗）</strong>
+        <div class="muted small" style="margin-top:6px">グリッド表示：管理No／マシン名</div>
+        <div id="okList" class="remainGrid"></div>
+      </div>
+
       <div class="card">
-        <strong>現在の一致</strong>
+        <strong>現在の一致（今回）</strong>
         <div id="current" class="stack"></div>
       </div>
 
@@ -72,9 +86,7 @@
 
       <div class="card" id="remainCard" style="display:none">
         <strong>未スキャン一覧（この店舗）</strong>
-        <div class="muted small" style="margin-top:6px">
-          グリッド表示：管理No／マシン名
-        </div>
+        <div class="muted small" style="margin-top:6px">グリッド表示：管理No／マシン名</div>
         <div id="remainList" class="remainGrid"></div>
       </div>
     </div>
@@ -94,17 +106,13 @@
     <div id="camTop">
       <div class="camTopLeft">
         <div id="camStatus" class="camStatus">camera: -</div>
-        <div id="camHint" class="camHint">
-          バーコードは正対／番号でもOK
-        </div>
-        <div class="camSubHint">
-          ※ 15〜25cm目安／ズームで反応UP
-        </div>
+        <div id="camHint" class="camHint">バーコードは正対／番号でもOK</div>
+        <div class="camSubHint">※ 15〜25cm目安／ズームで反応UP</div>
       </div>
 
       <div class="camTopRight" id="camTopRight">
-        <!-- 🔴 明示的な戻るボタン -->
-        <button id="camClose" class="secondary">← 戻る</button>
+        <!-- ✅ ここを確実に実装：戻る（閉じる） -->
+        <button id="camClose" class="secondary" type="button">← 戻る</button>
 
         <div class="toolPill">
           <span class="pillLabel">ZOOM</span>
@@ -112,7 +120,7 @@
           <span id="zoomVal" class="pillVal">1.6x</span>
         </div>
 
-        <button id="btnTorch" class="secondary">🔦</button>
+        <button id="btnTorch" class="secondary" type="button">🔦</button>
       </div>
     </div>
 
@@ -120,9 +128,7 @@
       <video id="camVideo" playsinline muted></video>
 
       <div id="overlay">
-        <div class="guideText">
-          ここに合わせてください（番号もOK）
-        </div>
+        <div class="guideText">ここに合わせてください（番号もOK）</div>
 
         <div class="band top"></div>
         <div class="band bottom"></div>
