@@ -100,12 +100,6 @@ input{
   background:#07140d;
 }
 .hitRow.done{opacity:.45;filter:grayscale(1)}
-/* 追加：重複（DUP） */
-.hitRow.dupRow{
-  border-color: rgba(239, 68, 68, .75);
-  background: rgba(127, 29, 29, .18);
-}
-
 .hitRow .meta{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
 .hitRow .code{font-weight:900}
 .hitRow .machine{color:#cbd5e1;margin-top:6px}
@@ -225,7 +219,7 @@ input{
 .band.top{top:46%}
 .band.bottom{top:54%}
 
-/* subtle corners */
+/* corners */
 .corner{
   position:absolute;
   width:30px; height:30px;
@@ -238,7 +232,7 @@ input{
 .corner.br{right:14px;bottom:14px;transform:rotate(180deg)}
 .corner.bl{left:14px;bottom:14px;transform:rotate(270deg)}
 
-/* flash feedback */
+/* flash */
 .flash{
   position:absolute; inset:0;
   background:rgba(255,255,255,.22);
