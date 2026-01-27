@@ -7,14 +7,15 @@
 
   <link rel="stylesheet" href="./style.css" />
 
-  <!-- ZXing（バーコード） -->
-  <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js"></script>
+  <!-- ✅ Quagga2（バーコード）: ZXingの代わり -->
+  <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.min.js"></script>
+
   <!-- Tesseract（OCR：番号読み） -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
 </head>
 
 <body>
-  <header id="title">棚卸スキャナ</header>
+  <header id="title">棚卸スキャナ（店舗選択）</header>
 
   <div class="badges">
     <div class="badge" id="storeBadge">store: HOME</div>
@@ -26,34 +27,33 @@
   </div>
 
   <main>
-    <!-- 店舗選択 -->
-    <div id="storeSelect" class="card">
-      <div class="muted small">店舗を選ぶとホーム画面（状況確認）に移動します。</div>
+    <div id="home" class="card">
+      <div class="muted small">店舗を選ぶとスキャン画面に移動します。</div>
       <div id="storeGrid" class="storeGrid"></div>
     </div>
 
-    <!-- 状況確認ホーム -->
-    <div id="homeStatus" style="display:none">
+    <div id="scanner" style="display:none">
       <div class="card">
-        <button id="btnBackStores" class="secondary">店舗一覧</button>
-        <button id="btnReset" class="secondary">リセット</button>
-        <button id="btnShowRemainHome" class="secondary">未スキャン一覧</button>
+        <button id="btnHome" class="secondary">店舗一覧</button>
+        <button id="btnClear" class="secondary">今回をクリア</button>
+        <button id="btnShowRemain" class="secondary">未スキャン一覧</button>
       </div>
 
       <div class="card">
         <p class="muted">
-          ここで読み取り状況を確認できます。<br />
-          「読み取り開始」で読み取り画面へ移動し、カメラを起動します。
+          ※ バーコード or シール番号（OCR）で反応します<br />
+          カメラは全画面で連続スキャン（閉じません）
         </p>
 
-        <button id="btnGoScan">▶ 読み取り開始</button>
+        <button id="btnCamera">📷 カメラでスキャン（全画面・連続）</button>
 
-        <div class="progressWrap" style="margin-top:12px">
+        <div class="progressWrap">
           <div class="muted small" id="progressText">progress: -</div>
           <div class="progressBar"><div class="progressFill" id="progressFill"></div></div>
         </div>
 
-        <div id="msgHome" class="muted" style="margin-top:10px"></div>
+        <input id="scanInput" placeholder="ここにフォーカス → スキャン…" autocomplete="off" />
+        <div id="msg" class="muted"></div>
       </div>
 
       <div class="card">
@@ -72,29 +72,6 @@
         <div id="remainList" class="remainGrid"></div>
       </div>
     </div>
-
-    <!-- 読み取り画面 -->
-    <div id="scanScreen" style="display:none">
-      <div class="card">
-        <button id="btnBackHome" class="secondary">← 戻る（ホーム）</button>
-      </div>
-
-      <div class="card">
-        <p class="muted">
-          ※ バーコード or シール番号（OCR）で反応します<br />
-          カメラは全画面で連続スキャン（閉じません）
-        </p>
-
-        <button id="btnCamera">📷 カメラでスキャン（全画面・連続）</button>
-
-        <input id="scanInput" placeholder="ここにフォーカス → スキャン…" autocomplete="off" />
-        <div id="msg" class="muted"></div>
-
-        <div class="muted small" style="margin-top:10px">
-          ※ 一致なし（INVALID）は記録しません（NGカウンタのみ増えます）
-        </div>
-      </div>
-    </div>
   </main>
 
   <div id="doneOverlay">
@@ -110,8 +87,8 @@
     <div id="camTop">
       <div class="camTopLeft">
         <div id="camStatus" class="camStatus">camera: -</div>
-        <div id="camHint" class="camHint">バーコード帯を枠内に（読めない時は番号でもOK）</div>
-        <div class="camSubHint">※ 近すぎ/遠すぎで読めません。距離を少し調整してください。</div>
+        <div id="camHint" class="camHint">バーコードはなるべく正対／番号でもOK</div>
+        <div class="camSubHint">※ 15〜25cm目安／ズームで反応が上がります</div>
       </div>
 
       <div class="camTopRight">
@@ -130,7 +107,7 @@
       <video id="camVideo" playsinline muted></video>
 
       <div id="overlay" aria-hidden="true">
-        <div class="guideText">バーコード帯をここに（番号でもOK）</div>
+        <div class="guideText">バーコード帯をここに（読めない時は番号でもOK）</div>
 
         <div class="band top"></div>
         <div class="band bottom"></div>
