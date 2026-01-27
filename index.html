@@ -7,10 +7,10 @@
 
   <link rel="stylesheet" href="./style.css" />
 
-  <!-- ✅ Quagga2（バーコード）: ZXingの代わり -->
+  <!-- Quagga2（バーコード） -->
   <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.min.js"></script>
 
-  <!-- Tesseract（OCR：番号読み） -->
+  <!-- Tesseract（OCR） -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
 </head>
 
@@ -27,11 +27,13 @@
   </div>
 
   <main>
+    <!-- ===== HOME ===== -->
     <div id="home" class="card">
       <div class="muted small">店舗を選ぶとスキャン画面に移動します。</div>
       <div id="storeGrid" class="storeGrid"></div>
     </div>
 
+    <!-- ===== SCANNER ===== -->
     <div id="scanner" style="display:none">
       <div class="card">
         <button id="btnHome" class="secondary">店舗一覧</button>
@@ -49,7 +51,9 @@
 
         <div class="progressWrap">
           <div class="muted small" id="progressText">progress: -</div>
-          <div class="progressBar"><div class="progressFill" id="progressFill"></div></div>
+          <div class="progressBar">
+            <div class="progressFill" id="progressFill"></div>
+          </div>
         </div>
 
         <input id="scanInput" placeholder="ここにフォーカス → スキャン…" autocomplete="off" />
@@ -68,12 +72,15 @@
 
       <div class="card" id="remainCard" style="display:none">
         <strong>未スキャン一覧（この店舗）</strong>
-        <div class="muted small" style="margin-top:6px">グリッド表示：管理No／マシン名</div>
+        <div class="muted small" style="margin-top:6px">
+          グリッド表示：管理No／マシン名
+        </div>
         <div id="remainList" class="remainGrid"></div>
       </div>
     </div>
   </main>
 
+  <!-- ===== 完了 ===== -->
   <div id="doneOverlay">
     <div id="doneCard">
       <div id="doneTitle">棚卸完了！🎉</div>
@@ -82,16 +89,23 @@
     </div>
   </div>
 
-  <!-- カメラ全画面モーダル -->
+  <!-- ===== カメラ全画面 ===== -->
   <div id="camModal" aria-hidden="true">
     <div id="camTop">
       <div class="camTopLeft">
         <div id="camStatus" class="camStatus">camera: -</div>
-        <div id="camHint" class="camHint">バーコードはなるべく正対／番号でもOK</div>
-        <div class="camSubHint">※ 15〜25cm目安／ズームで反応が上がります</div>
+        <div id="camHint" class="camHint">
+          バーコードは正対／番号でもOK
+        </div>
+        <div class="camSubHint">
+          ※ 15〜25cm目安／ズームで反応UP
+        </div>
       </div>
 
-      <div class="camTopRight">
+      <div class="camTopRight" id="camTopRight">
+        <!-- 🔴 明示的な戻るボタン -->
+        <button id="camClose" class="secondary">← 戻る</button>
+
         <div class="toolPill">
           <span class="pillLabel">ZOOM</span>
           <input id="zoomRange" type="range" min="1" max="3" step="0.1" value="1.6" />
@@ -99,15 +113,16 @@
         </div>
 
         <button id="btnTorch" class="secondary">🔦</button>
-        <button id="camClose" class="secondary">⏹ 閉じる</button>
       </div>
     </div>
 
     <div id="videoWrap">
       <video id="camVideo" playsinline muted></video>
 
-      <div id="overlay" aria-hidden="true">
-        <div class="guideText">バーコード帯をここに（読めない時は番号でもOK）</div>
+      <div id="overlay">
+        <div class="guideText">
+          ここに合わせてください（番号もOK）
+        </div>
 
         <div class="band top"></div>
         <div class="band bottom"></div>
