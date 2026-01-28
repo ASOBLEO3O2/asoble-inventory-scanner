@@ -21,8 +21,8 @@ const st = {
   all: [],
   rows: [],
   byCode: new Map(),
-  scanned: [],     // 今回の履歴（表示用）
-  okSet: new Set(),// 取得済み（永続）
+  scanned: [],      // 今回の履歴（表示用）
+  okSet: new Set(), // 取得済み（永続）
   ngCount: 0
 };
 
@@ -90,6 +90,7 @@ function escapeHtml(s){
 
 function vibrateOk(){ try{ if(navigator.vibrate) navigator.vibrate([60,30,60]); }catch(_e){} }
 function vibrateDone(){ try{ if(navigator.vibrate) navigator.vibrate([120,60,120,60,220]); }catch(_e){} }
+function vibrateWeak(){ try{ if(navigator.vibrate) navigator.vibrate(25); }catch(_e){} }
 
 let audioCtx = null;
 function beep(){
@@ -316,6 +317,7 @@ function addScan(v){
   const variants = codeVariants(v);
   if(!variants.length) return;
 
+  // 1) まず行に当たるか
   let hitRow = null;
   let hitKey = null;
 
@@ -328,7 +330,20 @@ function addScan(v){
     }
   }
 
+  const now = Date.now();
+
+  // 2) 行に当たらない場合：でも「既に取得済み(OK)」なら再スキャンとして扱う
   if(!hitRow){
+    const isRescan = variants.some(x => st.okSet.has(normalize(x)));
+    if(isRescan){
+      lastHitTs = now;
+      vibrateWeak();
+      showToast(`✅（再）取得済み`);
+      el("msg").textContent = "再スキャン（取得済み）";
+      return; // ❌にはしない
+    }
+
+    // 完全に一致なし
     st.ngCount++;
     persist();
     updateBadges();
@@ -337,15 +352,16 @@ function addScan(v){
     return;
   }
 
-  const now = Date.now();
-
-  // ✅ 最重要：済の再スキャンは完全無視（履歴にも積まない）
+  // 3) 行に当たったが、既にOKなら「再スキャン」扱い（一致なしには絶対にしない）
   if(st.okSet.has(hitKey)){
-    lastHitTs = now; // OCR暴れ抑制
-    return;
+    lastHitTs = now;
+    vibrateWeak();
+    showToast(`✅（再）${hitRow.code}`);
+    el("msg").textContent = "再スキャン（取得済み）";
+    return; // 履歴にも積まない（再スキャン地獄防止）
   }
 
-  // 初回のみ通す
+  // 4) 初回OK
   st.okSet.add(hitKey);
 
   vibrateOk();
@@ -705,21 +721,28 @@ async function startQuagga(){
   });
 }
 
+function timeoutPromise(ms){
+  return new Promise((resolve)=>setTimeout(resolve, ms));
+}
+
 async function stopQuagga(){
-  // 何度呼ばれても安全に止まる
   try{ stopOcrLoop(); }catch(_e){}
   camRunning = false;
 
+  // ✅ Quagga.stop が固まっても「戻る」を阻害しないようタイムアウト
   try{
     if(window.Quagga && quaggaStarted){
       if(quaggaOnDetected){
-        Quagga.offDetected(quaggaOnDetected);
+        try{ Quagga.offDetected(quaggaOnDetected); }catch(_e){}
         quaggaOnDetected = null;
       }
-      await new Promise((r)=>Quagga.stop(()=>r()));
+
+      await Promise.race([
+        new Promise((r)=>Quagga.stop(()=>r(true))),
+        timeoutPromise(900)
+      ]);
     }
   }catch(_e){
-    // Quagga.stop が落ちても続行（ここで止まると「戻るが効かない」になる）
   }finally{
     quaggaStarted = false;
   }
@@ -782,7 +805,7 @@ function bindUi(){
     location.href = location.pathname;
   });
 
-  // 取得済み一覧（OK一覧）
+  // 取得済み一覧
   el("btnShowOk").addEventListener("click", ()=>{
     const card = el("okCard");
     const showing = card.style.display !== "none" && card.style.display !== "";
@@ -801,7 +824,7 @@ function bindUi(){
     showToast("🧹 今回（履歴）をクリア");
   });
 
-  // ✅ 進捗リセット（永続も消す）
+  // 進捗リセット（永続も消す）
   el("btnResetProgress").addEventListener("click", ()=>{
     if(!STORE) return;
     const ok = confirm("この店舗の進捗（取得済み/NG/保存）をリセットします。よろしいですか？");
@@ -835,10 +858,12 @@ function bindUi(){
   });
 
   // ✅ 戻る（閉じる）
-  el("camClose").addEventListener("click", async ()=>{
-    await stopQuagga();
+  // 重要：画面は先に閉じる → 停止は後追い（止め処理が固まっても戻れる）
+  el("camClose").addEventListener("click", ()=>{
     closeCamModal();
-    showToast("⬅ スキャン画面へ戻りました");
+    showToast("⬅ 戻りました");
+    // 止めは後追いで安全に（例外は握る）
+    stopQuagga().catch(()=>{});
   });
 
   // トーチ/ズーム
@@ -852,12 +877,12 @@ function bindUi(){
   wireScanInput();
 }
 
-// 背景に行ったらカメラ止める（戻る不能の事故防止）
-document.addEventListener("visibilitychange", async ()=>{
+// 背景に行ったらカメラ止める
+document.addEventListener("visibilitychange", ()=>{
   if(document.hidden){
     if(el("camModal")?.style?.display === "block"){
-      await stopQuagga();
       closeCamModal();
+      stopQuagga().catch(()=>{});
     }
   }
 });
