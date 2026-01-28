@@ -38,15 +38,16 @@
       <div class="card">
         <button id="btnHome" class="secondary">店舗一覧</button>
 
-        <!-- ✅ 追加：取得済み一覧（OK一覧） -->
+        <!-- 取得済み一覧（OK一覧） -->
         <button id="btnShowOk" class="secondary">取得済み一覧</button>
 
-        <!-- ✅ 既存：今回だけ（履歴だけ） -->
+        <!-- 今回の履歴だけ -->
         <button id="btnClear" class="secondary">今回（履歴）をクリア</button>
 
-        <!-- ✅ 追加：進捗リセット（OK/NG/保存も消す） -->
+        <!-- 進捗リセット（OK/NG/保存） -->
         <button id="btnResetProgress" class="secondary">進捗リセット</button>
 
+        <!-- 未スキャン -->
         <button id="btnShowRemain" class="secondary">未スキャン一覧</button>
       </div>
 
@@ -67,7 +68,7 @@
         <div id="msg" class="muted"></div>
       </div>
 
-      <!-- ✅ 追加：取得済み一覧 -->
+      <!-- 取得済み一覧 -->
       <div class="card" id="okCard" style="display:none">
         <strong>取得済み一覧（この店舗）</strong>
         <div class="muted small" style="margin-top:6px">グリッド表示：管理No／マシン名</div>
@@ -84,6 +85,7 @@
         <div id="history" class="stack"></div>
       </div>
 
+      <!-- 未スキャン -->
       <div class="card" id="remainCard" style="display:none">
         <strong>未スキャン一覧（この店舗）</strong>
         <div class="muted small" style="margin-top:6px">グリッド表示：管理No／マシン名</div>
@@ -92,7 +94,7 @@
     </div>
   </main>
 
-  <!-- ===== 完了 ===== -->
+  <!-- 完了 -->
   <div id="doneOverlay">
     <div id="doneCard">
       <div id="doneTitle">棚卸完了！🎉</div>
@@ -101,7 +103,7 @@
     </div>
   </div>
 
-  <!-- ===== カメラ全画面 ===== -->
+  <!-- カメラ全画面モーダル -->
   <div id="camModal" aria-hidden="true">
     <div id="camTop">
       <div class="camTopLeft">
@@ -111,7 +113,6 @@
       </div>
 
       <div class="camTopRight" id="camTopRight">
-        <!-- ✅ ここを確実に実装：戻る（閉じる） -->
         <button id="camClose" class="secondary" type="button">← 戻る</button>
 
         <div class="toolPill">
@@ -126,6 +127,14 @@
 
     <div id="videoWrap">
       <video id="camVideo" playsinline muted></video>
+
+      <!-- ✅ 追加：縦画面でも必ず見える固定トーチ -->
+      <button
+        id="btnTorch2"
+        type="button"
+        class="secondary"
+        style="position:absolute; right:12px; bottom:12px; z-index:50;"
+      >🔦</button>
 
       <div id="overlay">
         <div class="guideText">ここに合わせてください（番号もOK）</div>
