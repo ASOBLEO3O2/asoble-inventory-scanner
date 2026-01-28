@@ -198,42 +198,55 @@ function clearProgress(){
   try{ localStorage.removeItem(storageKey()); }catch(_e){}
 }
 
-/* ========= ✅ SCAN_LOG 送信（session_id付き） ========= */
+/* ========= ✅ SCAN_LOG 送信（session_id付き・RESET強制） ========= */
 async function postScanLog({ code, machine_name="", result="OK", store_key="", store_name="" }){
-  if(!GAS_SCAN_LOG_URL) return;
+  if(!GAS_SCAN_LOG_URL) return false;
 
   const body = {
     ts: new Date().toISOString(),
-    session_id: getSessionId(), // ★追加
+    session_id: getSessionId(),
     store_key: (store_key || STORE || "").trim(),
     store_name: (store_name || "").trim(),
     code: String(code || "").trim(),
     machine_name: String(machine_name || "").trim(),
-    result: String(result || "OK").trim(),
+    result: String(result || "OK").trim(), // OK/NG/RESCAN/RESET
     source: "github-scan",
     ua: navigator.userAgent || ""
   };
 
-  // RESETはcodeなしOK
-  if(!body.code && body.result !== "RESET") return;
+  // ✅ RESET は code 空でも送る（それ以外は code 必須）
+  if(!body.code && body.result !== "RESET") return false;
 
   try{
     const res = await fetch(GAS_SCAN_LOG_URL, {
       method: "POST",
+      // text/plain のままでOK（プリフライト回避）
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(body),
+      cache: "no-store",
     });
 
     const txt = await res.text().catch(()=> "");
     let obj = null;
     try{ obj = JSON.parse(txt); }catch(_e){}
+
+    // GASがok:false返したら見えるようにする
+    if(obj && obj.ok === false){
+      showToast("⚠️ LOG失敗: " + (obj.error || "unknown"));
+      return false;
+    }
+
     if(obj?.dup){
       showToast("⚠️ 重複検知（同一コード）");
     }
+    return true;
+
   }catch(_e){
-    // 通信失敗でも端末内の進捗は残るので黙る（必要なら未送信管理を後で追加）
+    showToast("⚠️ LOG送信失敗（通信）");
+    return false;
   }
 }
+
 
 /* ========= バッジ/進捗 ========= */
 function showDoneIfComplete(){
@@ -951,26 +964,40 @@ function bindUi(){
     showToast("🧹 今回（履歴）をクリア");
   });
 
-  // 進捗リセット（永続も消す）＋ ✅ session_idを切り替え
-  el("btnResetProgress").addEventListener("click", ()=>{
-    if(!STORE) return;
-    const ok = confirm("この店舗の進捗（取得済み/NG/保存）をリセットします。よろしいですか？");
-    if(!ok) return;
+ // 進捗リセット（永続も消す）＋ ✅ session_idを切り替え（RESETログを確実に残す）
+el("btnResetProgress").addEventListener("click", async ()=>{
+  if(!STORE) return;
+  const ok = confirm("この店舗の進捗（取得済み/NG/保存）をリセットします。よろしいですか？");
+  if(!ok) return;
 
-    clearProgress();
+  // 先にUI側リセット
+  clearProgress();
+  hideDone();
+  updateBadges();
+  renderPanels();
+  el("remainCard").style.display = "none";
+  el("okCard").style.display = "none";
 
-    // ✅ 新セッション開始
-    rotateSession();
-    // ✅ RESETをログに1行だけ残す（code空でOK）
-    postScanLog({ code: "", result: "RESET", store_key: STORE, store_name: "" });
+  // ✅ 新セッション開始（ここで session_id を確定）
+  const sid = rotateSession();
+  showToast("🧾 RESET記録中…");
 
-    hideDone();
-    updateBadges();
-    renderPanels();
-    el("remainCard").style.display = "none";
-    el("okCard").style.display = "none";
-    showToast("🧨 進捗をリセットしました（新セッション）");
+  // ✅ RESETを必ず1行残す（awaitで確実化）
+  const sent = await postScanLog({
+    code: "",                 // RESETは空でOK（GAS側も許可）
+    machine_name: "",
+    store_key: STORE,
+    store_name: "",
+    result: "RESET"
   });
+
+  if(sent){
+    showToast("🧨 リセット完了（新セッション）");
+  }else{
+    showToast("⚠️ RESETログが残せていません");
+  }
+});
+
 
   // 未スキャン
   el("btnShowRemain").addEventListener("click", ()=>{
