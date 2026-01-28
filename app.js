@@ -4,6 +4,10 @@
 const DATA_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
+// ✅ SCAN_LOG 受け口（GAS Webアプリ）
+const GAS_SCAN_LOG_URL =
+  "https://script.google.com/macros/s/AKfycbz6Q1td16IL7UvGTh5ix3fTlvx8_6Xwah2U9Mp5PKUd8Fh-j37c6MBtvfDvEYGVmaJr1Q/exec";
+
 // 連続検出の誤連打抑制
 const SAME_CODE_COOLDOWN_MS = 1500;
 const ANY_CODE_COOLDOWN_MS  = 140;
@@ -163,6 +167,41 @@ function clearProgress(){
   st.ngCount = 0;
   st.scanned = [];
   try{ localStorage.removeItem(storageKey()); }catch(_e){}
+}
+
+/* ========= ✅ SCAN_LOG 送信 ========= */
+async function postScanLog({ code, machine_name="", result="OK", store_key="", store_name="" }){
+  if(!GAS_SCAN_LOG_URL) return;
+
+  const body = {
+    ts: new Date().toISOString(),
+    store_key: (store_key || STORE || "").trim(),
+    store_name: (store_name || "").trim(),
+    code: String(code || "").trim(),
+    machine_name: String(machine_name || "").trim(),
+    result: String(result || "OK").trim(),
+    source: "github-scan",
+    ua: navigator.userAgent || ""
+  };
+  if(!body.code) return;
+
+  try{
+    const res = await fetch(GAS_SCAN_LOG_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(body),
+    });
+
+    // dup=true が返れば強警告
+    const txt = await res.text().catch(()=> "");
+    let obj = null;
+    try{ obj = JSON.parse(txt); }catch(_e){}
+    if(obj?.dup){
+      showToast("⚠️ 重複検知（同一コード）");
+    }
+  }catch(_e){
+    // 通信失敗でも、端末内の進捗は persist() で残るのでここでは黙る
+  }
 }
 
 /* ========= バッジ/進捗 ========= */
@@ -342,6 +381,10 @@ function addScan(v){
       vibrateWeak();
       showToast(`✅（再）取得済み`);
       el("msg").textContent = "再スキャン（取得済み）";
+
+      // ✅ SCAN_LOG（RESCAN）
+      postScanLog({ code: variants[0] || "", result: "RESCAN" });
+
       return;
     }
 
@@ -351,6 +394,10 @@ function addScan(v){
     updateBadges();
     showToast("❌ 一致なし");
     el("msg").textContent = "一致なし（リストにありません）";
+
+    // ✅ SCAN_LOG（NG）
+    postScanLog({ code: variants[0] || "", result: "NG" });
+
     return;
   }
 
@@ -360,6 +407,16 @@ function addScan(v){
     vibrateWeak();
     showToast(`✅（再）${hitRow.code}`);
     el("msg").textContent = "再スキャン（取得済み）";
+
+    // ✅ SCAN_LOG（RESCAN）
+    postScanLog({
+      code: hitRow.code,
+      machine_name: hitRow.machine_name || "",
+      store_key: hitRow.store_key || STORE || "",
+      store_name: hitRow.store_name || "",
+      result: "RESCAN"
+    });
+
     return;
   }
 
@@ -378,6 +435,15 @@ function addScan(v){
   persist();
   renderPanels();
   showDoneIfComplete();
+
+  // ✅ SCAN_LOG（OK）
+  postScanLog({
+    code: hitRow.code,
+    machine_name: hitRow.machine_name || "",
+    store_key: hitRow.store_key || STORE || "",
+    store_name: hitRow.store_name || "",
+    result: "OK"
+  });
 }
 
 /* ========= カメラ（Quagga2 + OCR） ========= */
