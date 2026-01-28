@@ -4,7 +4,7 @@
 const DATA_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
 
-// ✅ 感度良すぎ対策（Quagga）
+// 連続検出の誤連打抑制
 const SAME_CODE_COOLDOWN_MS = 1500;
 const ANY_CODE_COOLDOWN_MS  = 140;
 
@@ -92,6 +92,7 @@ function vibrateOk(){ try{ if(navigator.vibrate) navigator.vibrate([60,30,60]); 
 function vibrateDone(){ try{ if(navigator.vibrate) navigator.vibrate([120,60,120,60,220]); }catch(_e){} }
 function vibrateWeak(){ try{ if(navigator.vibrate) navigator.vibrate(25); }catch(_e){} }
 
+// 成功時：音
 let audioCtx = null;
 function beep(){
   try{
@@ -121,6 +122,7 @@ function showToast(text){
     t.setAttribute("aria-hidden","true");
   }, 900);
 }
+
 function flash(){
   const f = el("flash");
   if(!f) return;
@@ -332,7 +334,7 @@ function addScan(v){
 
   const now = Date.now();
 
-  // 2) 行に当たらない場合：でも「既に取得済み(OK)」なら再スキャンとして扱う
+  // 2) 行に当たらないが、既にOKセットにあるなら「再スキャン」
   if(!hitRow){
     const isRescan = variants.some(x => st.okSet.has(normalize(x)));
     if(isRescan){
@@ -340,7 +342,7 @@ function addScan(v){
       vibrateWeak();
       showToast(`✅（再）取得済み`);
       el("msg").textContent = "再スキャン（取得済み）";
-      return; // ❌にはしない
+      return;
     }
 
     // 完全に一致なし
@@ -352,13 +354,13 @@ function addScan(v){
     return;
   }
 
-  // 3) 行に当たったが、既にOKなら「再スキャン」扱い（一致なしには絶対にしない）
+  // 3) 行に当たったが既にOK → 再スキャン
   if(st.okSet.has(hitKey)){
     lastHitTs = now;
     vibrateWeak();
     showToast(`✅（再）${hitRow.code}`);
     el("msg").textContent = "再スキャン（取得済み）";
-    return; // 履歴にも積まない（再スキャン地獄防止）
+    return;
   }
 
   // 4) 初回OK
@@ -378,7 +380,7 @@ function addScan(v){
   showDoneIfComplete();
 }
 
-/* ========= カメラ（preflight + Quagga2 + OCR） ========= */
+/* ========= カメラ（Quagga2 + OCR） ========= */
 let camRunning = false;
 let stream = null;
 let quaggaStarted = false;
@@ -429,6 +431,7 @@ async function applyTrackConstraints(advanced){
     return false;
   }
 }
+
 async function applyZoomFromUI(){
   const zr = el("zoomRange");
   const zv = el("zoomVal");
@@ -437,6 +440,7 @@ async function applyZoomFromUI(){
   zv.textContent = `${z.toFixed(1)}x`;
   await applyTrackConstraints({ zoom: z });
 }
+
 let torchOn = false;
 async function toggleTorch(){
   torchOn = !torchOn;
@@ -622,6 +626,66 @@ function stopOcrLoop(){
   setOcrBadge(false);
 }
 
+/* ✅ 強制停止（LED消えない対策） */
+function stopTracksFromStream(s){
+  try{
+    s?.getTracks?.().forEach(t=>{
+      try{ t.stop(); }catch(_e){}
+    });
+  }catch(_e){}
+}
+
+function forceStopCamera(){
+  // OCRは即止める
+  try{ stopOcrLoop(); }catch(_e){}
+  camRunning = false;
+
+  // Quagga内部を直接止める
+  try{
+    if(window.Quagga?.CameraAccess){
+      const ca = Quagga.CameraAccess;
+
+      if(typeof ca.getActiveStream === "function"){
+        const qs = ca.getActiveStream();
+        stopTracksFromStream(qs);
+      }
+
+      if(typeof ca.getActiveTrack === "function"){
+        const tr = ca.getActiveTrack();
+        try{ tr?.stop?.(); }catch(_e){}
+      }
+
+      if(typeof ca.release === "function"){
+        try{ ca.release(); }catch(_e){}
+      }
+    }
+  }catch(_e){}
+
+  // preflightのstreamも止める
+  stopTracksFromStream(stream);
+  stream = null;
+
+  // videoを剥がす
+  try{
+    const v = videoEl();
+    if(v) v.srcObject = null;
+  }catch(_e){}
+
+  // Quagga.stop は後追い（固まっても戻るのを邪魔しない）
+  try{
+    if(window.Quagga && quaggaStarted){
+      if(quaggaOnDetected){
+        try{ Quagga.offDetected(quaggaOnDetected); }catch(_e){}
+        quaggaOnDetected = null;
+      }
+      Quagga.stop(()=>{});
+    }
+  }catch(_e){}
+  quaggaStarted = false;
+
+  setCamStatus("camera: stopped");
+}
+
 /* Quagga */
 let quaggaOnDetected = null;
 
@@ -685,7 +749,7 @@ async function startQuagga(){
       camRunning = true;
       setCamStatus("camera: running");
 
-      // Quagga側trackが取れれば更新（ズーム/トーチ用）
+      // Quagga側trackを拾えるなら差し替え（ズーム/トーチ用）
       try{
         const ca = Quagga?.CameraAccess;
         if(ca?.getActiveTrack){
@@ -719,40 +783,6 @@ async function startQuagga(){
       resolve(true);
     });
   });
-}
-
-function timeoutPromise(ms){
-  return new Promise((resolve)=>setTimeout(resolve, ms));
-}
-
-async function stopQuagga(){
-  try{ stopOcrLoop(); }catch(_e){}
-  camRunning = false;
-
-  // ✅ Quagga.stop が固まっても「戻る」を阻害しないようタイムアウト
-  try{
-    if(window.Quagga && quaggaStarted){
-      if(quaggaOnDetected){
-        try{ Quagga.offDetected(quaggaOnDetected); }catch(_e){}
-        quaggaOnDetected = null;
-      }
-
-      await Promise.race([
-        new Promise((r)=>Quagga.stop(()=>r(true))),
-        timeoutPromise(900)
-      ]);
-    }
-  }catch(_e){
-  }finally{
-    quaggaStarted = false;
-  }
-
-  try{ stream?.getTracks?.().forEach(t=>t.stop()); }catch(_e){}
-  stream = null;
-
-  try{ const v = videoEl(); if(v) v.srcObject = null; }catch(_e){}
-
-  setCamStatus("camera: stopped");
 }
 
 /* ========= 入力欄（物理スキャナ） ========= */
@@ -857,17 +887,16 @@ function bindUi(){
     await startQuagga();
   });
 
-  // ✅ 戻る（閉じる）
-  // 重要：画面は先に閉じる → 停止は後追い（止め処理が固まっても戻れる）
+  // ✅ 戻る：即画面戻す + 強制停止（LED対策）
   el("camClose").addEventListener("click", ()=>{
     closeCamModal();
     showToast("⬅ 戻りました");
-    // 止めは後追いで安全に（例外は握る）
-    stopQuagga().catch(()=>{});
+    forceStopCamera();
   });
 
-  // トーチ/ズーム
-  el("btnTorch").addEventListener("click", toggleTorch);
+  // トーチ/ズーム（btnTorch2も効かせる）
+  el("btnTorch")?.addEventListener("click", toggleTorch);
+  el("btnTorch2")?.addEventListener("click", toggleTorch);
   el("zoomRange").addEventListener("input", applyZoomFromUI);
 
   // 完了オーバーレイ
@@ -877,12 +906,12 @@ function bindUi(){
   wireScanInput();
 }
 
-// 背景に行ったらカメラ止める
+// 背景に行ったら強制停止
 document.addEventListener("visibilitychange", ()=>{
   if(document.hidden){
     if(el("camModal")?.style?.display === "block"){
       closeCamModal();
-      stopQuagga().catch(()=>{});
+      forceStopCamera();
     }
   }
 });
