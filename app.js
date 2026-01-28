@@ -134,6 +134,35 @@ function flash(){
   setTimeout(()=>f.classList.remove("on"), 70);
 }
 
+/* ========= session_id（①方式） ========= */
+function sessionKey(){
+  return STORE ? `inv_session_${STORE}` : "inv_session__";
+}
+function newSessionId(){
+  const d = new Date();
+  const pad = (n)=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+function getSessionId(){
+  if(!STORE) return "";
+  try{
+    let v = localStorage.getItem(sessionKey());
+    if(!v){
+      v = newSessionId();
+      localStorage.setItem(sessionKey(), v);
+    }
+    return v;
+  }catch(_e){
+    return "";
+  }
+}
+function rotateSession(){
+  if(!STORE) return "";
+  const sid = newSessionId();
+  try{ localStorage.setItem(sessionKey(), sid); }catch(_e){}
+  return sid;
+}
+
 /* ========= 永続化（自動保存） ========= */
 function storageKey(){
   return STORE ? `inv_scan_ok_${STORE}` : "inv_scan_ok__";
@@ -169,12 +198,13 @@ function clearProgress(){
   try{ localStorage.removeItem(storageKey()); }catch(_e){}
 }
 
-/* ========= ✅ SCAN_LOG 送信 ========= */
+/* ========= ✅ SCAN_LOG 送信（session_id付き） ========= */
 async function postScanLog({ code, machine_name="", result="OK", store_key="", store_name="" }){
   if(!GAS_SCAN_LOG_URL) return;
 
   const body = {
     ts: new Date().toISOString(),
+    session_id: getSessionId(), // ★追加
     store_key: (store_key || STORE || "").trim(),
     store_name: (store_name || "").trim(),
     code: String(code || "").trim(),
@@ -183,7 +213,9 @@ async function postScanLog({ code, machine_name="", result="OK", store_key="", s
     source: "github-scan",
     ua: navigator.userAgent || ""
   };
-  if(!body.code) return;
+
+  // RESETはcodeなしOK
+  if(!body.code && body.result !== "RESET") return;
 
   try{
     const res = await fetch(GAS_SCAN_LOG_URL, {
@@ -192,7 +224,6 @@ async function postScanLog({ code, machine_name="", result="OK", store_key="", s
       body: JSON.stringify(body),
     });
 
-    // dup=true が返れば強警告
     const txt = await res.text().catch(()=> "");
     let obj = null;
     try{ obj = JSON.parse(txt); }catch(_e){}
@@ -200,7 +231,7 @@ async function postScanLog({ code, machine_name="", result="OK", store_key="", s
       showToast("⚠️ 重複検知（同一コード）");
     }
   }catch(_e){
-    // 通信失敗でも、端末内の進捗は persist() で残るのでここでは黙る
+    // 通信失敗でも端末内の進捗は残るので黙る（必要なら未送信管理を後で追加）
   }
 }
 
@@ -920,18 +951,25 @@ function bindUi(){
     showToast("🧹 今回（履歴）をクリア");
   });
 
-  // 進捗リセット（永続も消す）
+  // 進捗リセット（永続も消す）＋ ✅ session_idを切り替え
   el("btnResetProgress").addEventListener("click", ()=>{
     if(!STORE) return;
     const ok = confirm("この店舗の進捗（取得済み/NG/保存）をリセットします。よろしいですか？");
     if(!ok) return;
+
     clearProgress();
+
+    // ✅ 新セッション開始
+    rotateSession();
+    // ✅ RESETをログに1行だけ残す（code空でOK）
+    postScanLog({ code: "", result: "RESET", store_key: STORE, store_name: "" });
+
     hideDone();
     updateBadges();
     renderPanels();
     el("remainCard").style.display = "none";
     el("okCard").style.display = "none";
-    showToast("🧨 進捗をリセットしました");
+    showToast("🧨 進捗をリセットしました（新セッション）");
   });
 
   // 未スキャン
@@ -999,6 +1037,9 @@ async function boot(){
     renderHome();
     return;
   }
+
+  // ✅ 店舗に入った瞬間に session_id を確保（初回のみ生成）
+  getSessionId();
 
   restore();
   renderScan();
