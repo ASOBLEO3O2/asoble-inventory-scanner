@@ -134,6 +134,14 @@ function flash(){
   setTimeout(()=>f.classList.remove("on"), 70);
 }
 
+/* ========= ✅ いまの店舗名を必ず返す（NGでも空にしない） ========= */
+function currentStoreName(){
+  if(!STORE) return "";
+  // st.all から store_key→store_name を引く（最初に一致したもの）
+  const hit = st.all.find(r => String(r.store_key||"").trim() === STORE);
+  return (hit?.store_name || STORE || "").trim();
+}
+
 /* ========= session_id（①方式） ========= */
 function sessionKey(){
   return STORE ? `inv_session_${STORE}` : "inv_session__";
@@ -198,15 +206,19 @@ function clearProgress(){
   try{ localStorage.removeItem(storageKey()); }catch(_e){}
 }
 
-/* ========= ✅ SCAN_LOG 送信（session_id付き・RESET強制） ========= */
+/* ========= ✅ SCAN_LOG 送信 ========= */
 async function postScanLog({ code, machine_name="", result="OK", store_key="", store_name="" }){
   if(!GAS_SCAN_LOG_URL) return false;
+
+  // ✅ ここで必ず STORE / 店名 を埋める（NGでも空にしない）
+  const sk = (store_key || STORE || "").trim();
+  const sn = (store_name || currentStoreName() || "").trim();
 
   const body = {
     ts: new Date().toISOString(),
     session_id: getSessionId(),
-    store_key: (store_key || STORE || "").trim(),
-    store_name: (store_name || "").trim(),
+    store_key: sk,
+    store_name: sn,
     code: String(code || "").trim(),
     machine_name: String(machine_name || "").trim(),
     result: String(result || "OK").trim(), // OK/NG/RESCAN/RESET
@@ -220,7 +232,6 @@ async function postScanLog({ code, machine_name="", result="OK", store_key="", s
   try{
     const res = await fetch(GAS_SCAN_LOG_URL, {
       method: "POST",
-      // text/plain のままでOK（プリフライト回避）
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(body),
       cache: "no-store",
@@ -230,7 +241,6 @@ async function postScanLog({ code, machine_name="", result="OK", store_key="", s
     let obj = null;
     try{ obj = JSON.parse(txt); }catch(_e){}
 
-    // GASがok:false返したら見えるようにする
     if(obj && obj.ok === false){
       showToast("⚠️ LOG失敗: " + (obj.error || "unknown"));
       return false;
@@ -246,7 +256,6 @@ async function postScanLog({ code, machine_name="", result="OK", store_key="", s
     return false;
   }
 }
-
 
 /* ========= バッジ/進捗 ========= */
 function showDoneIfComplete(){
@@ -402,7 +411,6 @@ function addScan(v){
   const variants = codeVariants(v);
   if(!variants.length) return;
 
-  // 1) まず行に当たるか
   let hitRow = null;
   let hitKey = null;
 
@@ -426,8 +434,13 @@ function addScan(v){
       showToast(`✅（再）取得済み`);
       el("msg").textContent = "再スキャン（取得済み）";
 
-      // ✅ SCAN_LOG（RESCAN）
-      postScanLog({ code: variants[0] || "", result: "RESCAN" });
+      // ✅ RESCANでも必ず店舗を送る
+      postScanLog({
+        code: variants[0] || "",
+        result: "RESCAN",
+        store_key: STORE,
+        store_name: currentStoreName()
+      });
 
       return;
     }
@@ -439,8 +452,13 @@ function addScan(v){
     showToast("❌ 一致なし");
     el("msg").textContent = "一致なし（リストにありません）";
 
-    // ✅ SCAN_LOG（NG）
-    postScanLog({ code: variants[0] || "", result: "NG" });
+    // ✅ NGでも必ず店舗を送る（ここが今回の本命修正）
+    postScanLog({
+      code: variants[0] || "",
+      result: "NG",
+      store_key: STORE,
+      store_name: currentStoreName()
+    });
 
     return;
   }
@@ -452,12 +470,11 @@ function addScan(v){
     showToast(`✅（再）${hitRow.code}`);
     el("msg").textContent = "再スキャン（取得済み）";
 
-    // ✅ SCAN_LOG（RESCAN）
     postScanLog({
       code: hitRow.code,
       machine_name: hitRow.machine_name || "",
       store_key: hitRow.store_key || STORE || "",
-      store_name: hitRow.store_name || "",
+      store_name: hitRow.store_name || currentStoreName(),
       result: "RESCAN"
     });
 
@@ -480,12 +497,11 @@ function addScan(v){
   renderPanels();
   showDoneIfComplete();
 
-  // ✅ SCAN_LOG（OK）
   postScanLog({
     code: hitRow.code,
     machine_name: hitRow.machine_name || "",
     store_key: hitRow.store_key || STORE || "",
-    store_name: hitRow.store_name || "",
+    store_name: hitRow.store_name || currentStoreName(),
     result: "OK"
   });
 }
@@ -746,11 +762,9 @@ function stopTracksFromStream(s){
 }
 
 function forceStopCamera(){
-  // OCRは即止める
   try{ stopOcrLoop(); }catch(_e){}
   camRunning = false;
 
-  // Quagga内部を直接止める
   try{
     if(window.Quagga?.CameraAccess){
       const ca = Quagga.CameraAccess;
@@ -771,17 +785,14 @@ function forceStopCamera(){
     }
   }catch(_e){}
 
-  // preflightのstreamも止める
   stopTracksFromStream(stream);
   stream = null;
 
-  // videoを剥がす
   try{
     const v = videoEl();
     if(v) v.srcObject = null;
   }catch(_e){}
 
-  // Quagga.stop は後追い（固まっても戻るのを邪魔しない）
   try{
     if(window.Quagga && quaggaStarted){
       if(quaggaOnDetected){
@@ -859,7 +870,6 @@ async function startQuagga(){
       camRunning = true;
       setCamStatus("camera: running");
 
-      // Quagga側trackを拾えるなら差し替え（ズーム/トーチ用）
       try{
         const ca = Quagga?.CameraAccess;
         if(ca?.getActiveTrack){
@@ -940,12 +950,10 @@ async function loadCsv(){
 
 /* ========= UI ========= */
 function bindUi(){
-  // HOME
   el("btnHome").addEventListener("click", ()=>{
     location.href = location.pathname;
   });
 
-  // 取得済み一覧
   el("btnShowOk").addEventListener("click", ()=>{
     const card = el("okCard");
     const showing = card.style.display !== "none" && card.style.display !== "";
@@ -956,7 +964,6 @@ function bindUi(){
     }
   });
 
-  // 今回の履歴だけ消す
   el("btnClear").addEventListener("click", ()=>{
     st.scanned = [];
     el("current").innerHTML = "";
@@ -964,42 +971,37 @@ function bindUi(){
     showToast("🧹 今回（履歴）をクリア");
   });
 
- // 進捗リセット（永続も消す）＋ ✅ session_idを切り替え（RESETログを確実に残す）
-el("btnResetProgress").addEventListener("click", async ()=>{
-  if(!STORE) return;
-  const ok = confirm("この店舗の進捗（取得済み/NG/保存）をリセットします。よろしいですか？");
-  if(!ok) return;
+  // 進捗リセット（永続も消す）＋ session_id切替 ＋ RESETログ必ず残す
+  el("btnResetProgress").addEventListener("click", async ()=>{
+    if(!STORE) return;
+    const ok = confirm("この店舗の進捗（取得済み/NG/保存）をリセットします。よろしいですか？");
+    if(!ok) return;
 
-  // 先にUI側リセット
-  clearProgress();
-  hideDone();
-  updateBadges();
-  renderPanels();
-  el("remainCard").style.display = "none";
-  el("okCard").style.display = "none";
+    clearProgress();
+    hideDone();
+    updateBadges();
+    renderPanels();
+    el("remainCard").style.display = "none";
+    el("okCard").style.display = "none";
 
-  // ✅ 新セッション開始（ここで session_id を確定）
-  const sid = rotateSession();
-  showToast("🧾 RESET記録中…");
+    const sid = rotateSession();
+    showToast("🧾 RESET記録中…");
 
-  // ✅ RESETを必ず1行残す（awaitで確実化）
-  const sent = await postScanLog({
-    code: "",                 // RESETは空でOK（GAS側も許可）
-    machine_name: "",
-    store_key: STORE,
-    store_name: "",
-    result: "RESET"
+    const sent = await postScanLog({
+      code: "",
+      machine_name: "",
+      store_key: STORE,
+      store_name: currentStoreName(),
+      result: "RESET"
+    });
+
+    if(sent){
+      showToast("🧨 リセット完了（新セッション）");
+    }else{
+      showToast("⚠️ RESETログが残せていません");
+    }
   });
 
-  if(sent){
-    showToast("🧨 リセット完了（新セッション）");
-  }else{
-    showToast("⚠️ RESETログが残せていません");
-  }
-});
-
-
-  // 未スキャン
   el("btnShowRemain").addEventListener("click", ()=>{
     const card = el("remainCard");
     const showing = card.style.display !== "none" && card.style.display !== "";
@@ -1010,7 +1012,6 @@ el("btnResetProgress").addEventListener("click", async ()=>{
     }
   });
 
-  // カメラ起動
   el("btnCamera").addEventListener("click", async ()=>{
     openCamModal();
     const ok = await startCameraPreflight();
@@ -1018,26 +1019,21 @@ el("btnResetProgress").addEventListener("click", async ()=>{
     await startQuagga();
   });
 
-  // ✅ 戻る：即画面戻す + 強制停止（LED対策）
   el("camClose").addEventListener("click", ()=>{
     closeCamModal();
     showToast("⬅ 戻りました");
     forceStopCamera();
   });
 
-  // トーチ/ズーム（btnTorch2も効かせる）
   el("btnTorch")?.addEventListener("click", toggleTorch);
   el("btnTorch2")?.addEventListener("click", toggleTorch);
   el("zoomRange").addEventListener("input", applyZoomFromUI);
 
-  // 完了オーバーレイ
   el("btnDoneClose").addEventListener("click", hideDone);
 
-  // 入力欄
   wireScanInput();
 }
 
-// 背景に行ったら強制停止
 document.addEventListener("visibilitychange", ()=>{
   if(document.hidden){
     if(el("camModal")?.style?.display === "block"){
@@ -1065,7 +1061,7 @@ async function boot(){
     return;
   }
 
-  // ✅ 店舗に入った瞬間に session_id を確保（初回のみ生成）
+  // 店舗に入った瞬間に session_id を確保
   getSessionId();
 
   restore();
