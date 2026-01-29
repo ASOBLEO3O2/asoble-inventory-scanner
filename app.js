@@ -27,7 +27,10 @@ const st = {
   byCode: new Map(),
   scanned: [],      // 今回の履歴（表示用）
   okSet: new Set(), // 取得済み（永続）
-  ngCount: 0
+  ngCount: 0,
+
+  // ✅ 追加：store_key -> store_name
+  storeNameByKey: new Map(),
 };
 
 /* ========= 正規化 ========= */
@@ -134,14 +137,6 @@ function flash(){
   setTimeout(()=>f.classList.remove("on"), 70);
 }
 
-/* ========= ✅ いまの店舗名を必ず返す（NGでも空にしない） ========= */
-function currentStoreName(){
-  if(!STORE) return "";
-  // st.all から store_key→store_name を引く（最初に一致したもの）
-  const hit = st.all.find(r => String(r.store_key||"").trim() === STORE);
-  return (hit?.store_name || STORE || "").trim();
-}
-
 /* ========= session_id（①方式） ========= */
 function sessionKey(){
   return STORE ? `inv_session_${STORE}` : "inv_session__";
@@ -149,6 +144,7 @@ function sessionKey(){
 function newSessionId(){
   const d = new Date();
   const pad = (n)=>String(n).padStart(2,"0");
+  // ✅ GAS側が見やすいように「YYYYMMDD_HHMMSS」
   return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 function getSessionId(){
@@ -206,19 +202,24 @@ function clearProgress(){
   try{ localStorage.removeItem(storageKey()); }catch(_e){}
 }
 
-/* ========= ✅ SCAN_LOG 送信 ========= */
-async function postScanLog({ code, machine_name="", result="OK", store_key="", store_name="" }){
-  if(!GAS_SCAN_LOG_URL) return false;
+/* ========= ✅ 店舗名取得（STORE固定で使う） ========= */
+function currentStoreName(){
+  if(!STORE) return "";
+  return String(st.storeNameByKey.get(STORE) || STORE).trim();
+}
 
-  // ✅ ここで必ず STORE / 店名 を埋める（NGでも空にしない）
-  const sk = (store_key || STORE || "").trim();
-  const sn = (store_name || currentStoreName() || "").trim();
+/* ========= ✅ SCAN_LOG 送信（store_key/store_name は常に STORE に固定） ========= */
+async function postScanLog({ code, machine_name="", result="OK" }){
+  if(!GAS_SCAN_LOG_URL) return false;
 
   const body = {
     ts: new Date().toISOString(),
     session_id: getSessionId(),
-    store_key: sk,
-    store_name: sn,
+
+    // ✅ ここが重要：混ざる原因を完全排除
+    store_key: (STORE || "").trim(),
+    store_name: currentStoreName(),
+
     code: String(code || "").trim(),
     machine_name: String(machine_name || "").trim(),
     result: String(result || "OK").trim(), // OK/NG/RESCAN/RESET
@@ -232,7 +233,7 @@ async function postScanLog({ code, machine_name="", result="OK", store_key="", s
   try{
     const res = await fetch(GAS_SCAN_LOG_URL, {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, // プリフライト回避
       body: JSON.stringify(body),
       cache: "no-store",
     });
@@ -245,9 +246,11 @@ async function postScanLog({ code, machine_name="", result="OK", store_key="", s
       showToast("⚠️ LOG失敗: " + (obj.error || "unknown"));
       return false;
     }
-
     if(obj?.dup){
       showToast("⚠️ 重複検知（同一コード）");
+    }
+    if(obj?.warn){
+      showToast("⚠️ " + String(obj.warn));
     }
     return true;
 
@@ -411,6 +414,7 @@ function addScan(v){
   const variants = codeVariants(v);
   if(!variants.length) return;
 
+  // 1) まず行に当たるか
   let hitRow = null;
   let hitKey = null;
 
@@ -434,14 +438,8 @@ function addScan(v){
       showToast(`✅（再）取得済み`);
       el("msg").textContent = "再スキャン（取得済み）";
 
-      // ✅ RESCANでも必ず店舗を送る
-      postScanLog({
-        code: variants[0] || "",
-        result: "RESCAN",
-        store_key: STORE,
-        store_name: currentStoreName()
-      });
-
+      // ✅ SCAN_LOG（RESCAN） store固定
+      postScanLog({ code: variants[0] || "", result: "RESCAN" });
       return;
     }
 
@@ -452,14 +450,8 @@ function addScan(v){
     showToast("❌ 一致なし");
     el("msg").textContent = "一致なし（リストにありません）";
 
-    // ✅ NGでも必ず店舗を送る（ここが今回の本命修正）
-    postScanLog({
-      code: variants[0] || "",
-      result: "NG",
-      store_key: STORE,
-      store_name: currentStoreName()
-    });
-
+    // ✅ SCAN_LOG（NG） store固定
+    postScanLog({ code: variants[0] || "", result: "NG" });
     return;
   }
 
@@ -470,14 +462,12 @@ function addScan(v){
     showToast(`✅（再）${hitRow.code}`);
     el("msg").textContent = "再スキャン（取得済み）";
 
+    // ✅ SCAN_LOG（RESCAN） store固定
     postScanLog({
       code: hitRow.code,
       machine_name: hitRow.machine_name || "",
-      store_key: hitRow.store_key || STORE || "",
-      store_name: hitRow.store_name || currentStoreName(),
       result: "RESCAN"
     });
-
     return;
   }
 
@@ -497,11 +487,10 @@ function addScan(v){
   renderPanels();
   showDoneIfComplete();
 
+  // ✅ SCAN_LOG（OK） store固定
   postScanLog({
     code: hitRow.code,
     machine_name: hitRow.machine_name || "",
-    store_key: hitRow.store_key || STORE || "",
-    store_name: hitRow.store_name || currentStoreName(),
     result: "OK"
   });
 }
@@ -934,6 +923,16 @@ async function loadCsv(){
   const text = await res.text();
   st.all = parseCSV(text);
 
+  // ✅ storeNameByKey を作る（最初に1回）
+  st.storeNameByKey.clear();
+  for(const r of st.all){
+    const sk = String(r.store_key || "").trim();
+    if(!sk) continue;
+    if(!st.storeNameByKey.has(sk)){
+      st.storeNameByKey.set(sk, String(r.store_name || sk).trim());
+    }
+  }
+
   st.byCode.clear();
   for(const r of st.all){
     for(const v of codeVariants(r.code)){
@@ -971,7 +970,7 @@ function bindUi(){
     showToast("🧹 今回（履歴）をクリア");
   });
 
-  // 進捗リセット（永続も消す）＋ session_id切替 ＋ RESETログ必ず残す
+  // 進捗リセット（永続も消す）＋ session_id切替 ＋ RESETログ
   el("btnResetProgress").addEventListener("click", async ()=>{
     if(!STORE) return;
     const ok = confirm("この店舗の進捗（取得済み/NG/保存）をリセットします。よろしいですか？");
@@ -984,22 +983,16 @@ function bindUi(){
     el("remainCard").style.display = "none";
     el("okCard").style.display = "none";
 
-    const sid = rotateSession();
+    rotateSession(); // ✅ 先に新セッション
     showToast("🧾 RESET記録中…");
 
     const sent = await postScanLog({
       code: "",
       machine_name: "",
-      store_key: STORE,
-      store_name: currentStoreName(),
       result: "RESET"
     });
 
-    if(sent){
-      showToast("🧨 リセット完了（新セッション）");
-    }else{
-      showToast("⚠️ RESETログが残せていません");
-    }
+    showToast(sent ? "🧨 リセット完了（新セッション）" : "⚠️ RESETログが残せていません");
   });
 
   el("btnShowRemain").addEventListener("click", ()=>{
@@ -1061,7 +1054,7 @@ async function boot(){
     return;
   }
 
-  // 店舗に入った瞬間に session_id を確保
+  // ✅ 店舗に入った瞬間に session_id を確保
   getSessionId();
 
   restore();
