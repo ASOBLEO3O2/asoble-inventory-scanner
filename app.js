@@ -6,7 +6,7 @@ const DATA_CSV_URL =
 
 // ✅ SCAN_LOG 受け口（GAS Webアプリ）
 const GAS_SCAN_LOG_URL =
-  "https://script.google.com/macros/s/AKfycbz6Q1td16IL7UvGTh5ix3fTlvx8_6Xwah2U9Mp5PKUd8Fh-j37c6MBtvfDvEYGVmaJr1Q/exec";
+  "https://script.google.com/macros/s/AKfycbz6Q1td16IL7UvGTh5ix3fTlvx8_6Xwah2U9Mp5PKUd8Fh-j37c6MBtvfDvEYGVmaJr1Q/exec"
 
 // 連続検出の誤連打抑制
 const SAME_CODE_COOLDOWN_MS = 1500;
