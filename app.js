@@ -2,7 +2,7 @@
 
 /* ========= 設定 ========= */
 const DATA_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRWOsLuIiIAdMPSlO896mqWtV6wwPdnRtofYq11XqKWwKeg1rauOgt0_mMOxbvP3smksrXMCV5ZROaG/pub?gid=2104427305&single=true&output=csv";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTiwtxITkdkbft_o3_Nf13lhEKTwj-9Ue3OBU3lDf4Um3DMOAfvatc_4kpUNvMjh4UwfNJjuKDD9GJy/pub?gid=1631694178&single=true&output=csv";
 
 // ✅ SCAN_LOG 受け口（GAS Webアプリ）
 const GAS_SCAN_LOG_URL =
